@@ -1,0 +1,80 @@
+{
+  "schemaVersion": 1,
+  "id": "snouhaud.rclone-mounts",
+  "name": "rclone mounts",
+  "version": "1.0.0",
+  "author": "snouhaud",
+  "license": "MIT",
+  "description": "List rclone remotes and mount or unmount them from the Omarchy bar, with the full / writes / read-only VFS modes of rclone-manager.",
+  "kinds": [
+    "bar-widget"
+  ],
+  "entryPoints": {
+    "barWidget": "Panel.qml"
+  },
+  "barWidget": {
+    "displayName": "rclone mounts",
+    "description": "Mount and unmount rclone remotes, pick the VFS cache mode, and open mounted folders.",
+    "category": "Files",
+    "allowMultiple": false,
+    "defaultSection": "right",
+    "defaults": {
+      "refreshIntervalSec": 30,
+      "mountBase": "~/mnt",
+      "defaultMode": "full",
+      "excludedRemotes": "bdvideos-local",
+      "readOnlyRemotes": "",
+      "openAfterMount": true,
+      "showCount": true
+    },
+    "schema": [
+      {
+        "key": "refreshIntervalSec",
+        "type": "integer",
+        "label": "Refresh interval (seconds)",
+        "min": 5,
+        "max": 3600,
+        "step": 5,
+        "defaultValue": 30
+      },
+      {
+        "key": "mountBase",
+        "type": "path",
+        "label": "Mount folder",
+        "defaultValue": "~/mnt",
+        "description": "Each remote is mounted at <folder>/<remote>."
+      },
+      {
+        "key": "defaultMode",
+        "type": "enum",
+        "label": "Default mount mode",
+        "options": ["full", "writes", "read-only"],
+        "defaultValue": "full"
+      },
+      {
+        "key": "excludedRemotes",
+        "type": "string",
+        "label": "Hidden remotes (comma-separated)",
+        "defaultValue": "bdvideos-local"
+      },
+      {
+        "key": "readOnlyRemotes",
+        "type": "string",
+        "label": "Always read-only remotes (comma-separated)",
+        "defaultValue": ""
+      },
+      {
+        "key": "openAfterMount",
+        "type": "boolean",
+        "label": "Open the folder after mounting",
+        "defaultValue": true
+      },
+      {
+        "key": "showCount",
+        "type": "boolean",
+        "label": "Show the number of mounts in the bar",
+        "defaultValue": true
+      }
+    ]
+  }
+}
