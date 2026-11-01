@@ -51,7 +51,7 @@ Create remotes with `rclone config` if you have none yet.
   Left click opens the panel, right click refreshes.
 - **Panel keys**: `↑`/`↓` move, `←`/`→` change mode, `Enter` mount/unmount,
   `m` cycle mode, `o` open the mounted folder, `r` refresh, `u` unlock,
-  `c` run `rclone config`.
+  `f` forget the keyring password, `c` run `rclone config`.
 
 ### Encrypted rclone config
 
@@ -62,6 +62,16 @@ To store it yourself:
 
 ```bash
 secret-tool store --label="rclone config" service rclone key config
+```
+
+To remove it, use **Forget the keyring password** at the bottom of the panel
+(click twice to confirm, or press `f` twice). Mounts already running keep
+working; the next unlock asks for the password again. If the stored password
+stops working (for example after `rclone config` changed it), the panel shows
+an alert and lets you enter it again or forget it. From a terminal:
+
+```bash
+secret-tool clear service rclone key config
 ```
 
 ## Language
@@ -101,6 +111,7 @@ The mode used for each mount is remembered in `<mountBase>/.<remote>.mode`.
 omarchy-shell snouhaud.rclone-mounts status          # one line per remote
 omarchy-shell snouhaud.rclone-mounts mount gdrive writes
 omarchy-shell snouhaud.rclone-mounts unmount gdrive
+omarchy-shell snouhaud.rclone-mounts forget          # delete the keyring password
 omarchy-shell snouhaud.rclone-mounts refresh | toggle | open | close
 ```
 
