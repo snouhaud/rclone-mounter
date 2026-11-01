@@ -14,7 +14,7 @@ Item {
   property string base: ""
   property var remotes: []
   // Prerequisite problems from the last status: rcloneMissing, fuseMissing,
-  // noConfig, noRemotes.
+  // noConfig, noRemotes, and (only while locked) secretToolMissing, zenityMissing.
   property var issues: []
   property string configPath: ""
   property string lastError: ""
@@ -30,7 +30,7 @@ Item {
   // Problems that prevent listing remotes at all.
   readonly property bool blocked: rcloneMissing || noConfig
   readonly property bool canMount: !blocked && !fuseMissing && !locked
-  readonly property var knownIssues: ["rcloneMissing", "fuseMissing", "noConfig", "noRemotes"]
+  readonly property var knownIssues: ["rcloneMissing", "fuseMissing", "noConfig", "noRemotes", "secretToolMissing", "zenityMissing"]
   readonly property int mountedCount: {
     var n = 0
     for (var i = 0; i < remotes.length; i++) if (remotes[i].mounted) n++
@@ -40,7 +40,7 @@ Item {
   readonly property string helperPath: decodeURIComponent(String(Qt.resolvedUrl("rclone-mounts.sh")).replace(/^file:\/\//, ""))
   readonly property int refreshIntervalSec: intSetting("refreshIntervalSec", 30, 5, 3600)
   readonly property string mountBase: String(setting("mountBase", "~/mnt")).substring(0, 512)
-  readonly property string excludedRemotes: String(setting("excludedRemotes", "bdvideos-local")).substring(0, 1024)
+  readonly property string excludedRemotes: String(setting("excludedRemotes", "")).substring(0, 1024)
   readonly property string readOnlyRemotes: String(setting("readOnlyRemotes", "")).substring(0, 1024)
   readonly property bool openAfterMount: setting("openAfterMount", true) === true
   readonly property string defaultMode: validMode(setting("defaultMode", "full")) ? String(setting("defaultMode", "full")) : "full"
@@ -136,6 +136,8 @@ Item {
   function installRclone() { runInTerminal("omarchy pkg add rclone") }
   function installFuse() { runInTerminal("omarchy pkg add fuse3") }
   function configureRclone() { runInTerminal("rclone config") }
+  function installSecretTool() { runInTerminal("omarchy pkg add libsecret") }
+  function installZenity() { runInTerminal("omarchy pkg add zenity") }
 
   function runAction(command, name) {
     if (actionProcess.running) return

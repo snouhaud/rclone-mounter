@@ -3,9 +3,9 @@
   "id": "snouhaud.rclone-mounts",
   "name": "rclone mounts",
   "version": "1.0.0",
-  "author": "snouhaud",
+  "author": "Stéphane Nouhaud (snouhaud)",
   "license": "MIT",
-  "description": "List rclone remotes and mount or unmount them from the Omarchy bar, with the full / writes / read-only VFS modes of rclone-manager.",
+  "description": "List rclone remotes and mount or unmount them from the Omarchy bar, with full, streaming (writes) or read-only VFS cache modes.",
   "kinds": [
     "bar-widget"
   ],
@@ -22,7 +22,7 @@
       "refreshIntervalSec": 30,
       "mountBase": "~/mnt",
       "defaultMode": "full",
-      "excludedRemotes": "bdvideos-local",
+      "excludedRemotes": "",
       "readOnlyRemotes": "",
       "openAfterMount": true,
       "showCount": true
@@ -48,14 +48,18 @@
         "key": "defaultMode",
         "type": "enum",
         "label": "Default mount mode",
-        "options": ["full", "writes", "read-only"],
+        "options": [
+          "full",
+          "writes",
+          "read-only"
+        ],
         "defaultValue": "full"
       },
       {
         "key": "excludedRemotes",
         "type": "string",
         "label": "Hidden remotes (comma-separated)",
-        "defaultValue": "bdvideos-local"
+        "defaultValue": ""
       },
       {
         "key": "readOnlyRemotes",

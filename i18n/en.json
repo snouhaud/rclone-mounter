@@ -24,7 +24,7 @@
   "remote.unmount": "Unmount",
   "remote.mountWith": "Mount (%1)",
   "unlock.title": "Unlock the rclone configuration",
-  "unlock.help": "The password is stored in the GNOME keyring, like rclone-manager.",
+  "unlock.help": "The password is stored in the keyring (secret-tool: service rclone key config).",
   "error.generic": "rclone command failed",
   "error.badPassword": "Wrong password or unreadable configuration",
   "error.rcloneMissing": "rclone is not installed",
@@ -34,7 +34,7 @@
   "error.unknownRemote": "Unknown remote",
   "error.keyringFailed": "Could not save the password in the keyring",
   "error.statusFailed": "Could not read rclone status",
-  "error.parseFailed": "Unexpected answer from rclone-mounts.sh",
+  "error.parseFailed": "Unexpected answer from the rclone-mounts.sh helper",
   "hero.loading": "Checking…",
   "hero.unavailable": "Unavailable",
   "alert.install": "Install",
@@ -48,5 +48,12 @@
   "alert.noRemotes": "No remote configured",
   "alert.noRemotesHelp": "The rclone configuration has no remote yet. Add one with rclone config.",
   "error.fuseMissing": "FUSE 3 is not available: install fuse3",
-  "error.noConfig": "No rclone configuration"
+  "error.noConfig": "No rclone configuration",
+  "alert.secretToolMissing": "secret-tool is not installed",
+  "alert.secretToolMissingHelp": "Your rclone configuration is encrypted; its password is kept in the keyring with secret-tool. Install the libsecret package (omarchy pkg add libsecret).",
+  "alert.zenityMissing": "zenity is not installed",
+  "alert.zenityMissingHelp": "zenity shows the password prompt used to unlock the rclone configuration (omarchy pkg add zenity).",
+  "error.secretToolMissing": "secret-tool is not installed: install libsecret",
+  "error.zenityMissing": "zenity is not installed",
+  "error.jqMissing": "jq is not installed"
 }

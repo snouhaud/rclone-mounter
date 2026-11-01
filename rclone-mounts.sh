@@ -1,7 +1,10 @@
 #!/bin/bash
 # Backend for the snouhaud.rclone-mounts Omarchy shell plugin.
-# Adapted from ~/.local/bin/rclone-manager (same keyring entry, same VFS modes
-# and mount options) but non-interactive: every command prints one JSON line.
+# Non-interactive (except `unlock`): every command prints one JSON line.
+#
+# An encrypted rclone config is unlocked with the password stored in the
+# Secret Service keyring under the attributes `service rclone key config`
+# (store it with: secret-tool store --label="rclone config" service rclone key config).
 #
 #   rclone-mounts.sh status  <base> <excluded,csv> <readonly,csv>
 #   rclone-mounts.sh mount   <base> <remote> <full|writes|read-only> <readonly,csv> <open:0|1>
@@ -24,6 +27,14 @@ command -v jq >/dev/null 2>&1 || { echo '{"ok":false,"error":"jqMissing"}'; exit
 # --- Prerequisites ----------------------------------------------------------
 have_rclone() { command -v rclone >/dev/null 2>&1; }
 have_fuse() { command -v fusermount3 >/dev/null 2>&1 && [[ -c /dev/fuse ]]; }
+have_secret_tool() { command -v secret-tool >/dev/null 2>&1; }
+have_zenity() { command -v zenity >/dev/null 2>&1; }
+
+# Desktop notification, skipped quietly when notify-send is not installed.
+notify() {
+  command -v notify-send >/dev/null 2>&1 && notify-send "rclone" "$1" 2>/dev/null
+  return 0
+}
 
 # Sets CONFIG_PATH; succeeds when the rclone config file exists and is non-empty.
 # Honors RCLONE_CONFIG through rclone itself.
@@ -35,6 +46,8 @@ have_config() {
 require_rclone() { have_rclone || json_error rcloneMissing; }
 require_fuse() { have_fuse || json_error fuseMissing; }
 require_config() { have_config || json_error noConfig "$CONFIG_PATH"; }
+require_secret_tool() { have_secret_tool || json_error secretToolMissing; }
+require_zenity() { have_zenity || json_error zenityMissing; }
 
 # Status reply when a prerequisite blocks listing remotes.
 status_blocked() {
@@ -72,6 +85,7 @@ in_csv() {
 # Password: GNOME keyring only. Prompting happens in `unlock`, never in status.
 load_password() {
   local p
+  have_secret_tool || return 1
   p=$(secret-tool lookup service rclone key config 2>/dev/null)
   [[ -n $p ]] || return 1
   export RCLONE_CONFIG_PASS="$p"
@@ -98,6 +112,9 @@ cmd_status() {
   local listing
   if ! listing=$(list_remotes); then
     if [[ -z ${RCLONE_CONFIG_PASS:-} ]]; then
+      # Locked: unlocking needs a keyring client and a password dialog.
+      have_secret_tool || issues+=(secretToolMissing)
+      have_zenity || issues+=(zenityMissing)
       printf '%s\n' "${issues[@]}" | jq -cRs --arg base "$base" --arg config "$CONFIG_PATH" \
         '{ok: true, locked: true, base: $base, configPath: $config,
           issues: (split("\n") | map(select(. != ""))), remotes: []}'
@@ -195,7 +212,7 @@ cmd_mount() {
 
   if mountpoint -q "$target"; then
     printf '%s' "$mode" >"$state"
-    notify-send "rclone" "$name → $target ($mode)" 2>/dev/null
+    notify "Mounted $name at $target ($mode)"
     [[ $open_after == 1 ]] && setsid -f env -u LC_ALL xdg-open "$target" >/dev/null 2>&1
     jq -cn --arg name "$name" --arg mode "$mode" '{ok: true, action: "mount", name: $name, mode: $mode}'
   else
@@ -222,7 +239,7 @@ cmd_unmount() {
   if err=$(fusermount3 -uz -- "$target" 2>&1); then
     rm -f -- "$base/.$name.mode"
     rmdir -- "$target" 2>/dev/null
-    notify-send "rclone" "$name démonté" 2>/dev/null
+    notify "Unmounted $name"
     jq -cn --arg name "$name" '{ok: true, action: "unmount", name: $name}'
   else
     json_error unmountFailed "$err"
@@ -232,8 +249,10 @@ cmd_unmount() {
 cmd_unlock() {
   require_rclone
   require_config
+  require_secret_tool
+  require_zenity
   local p
-  p=$(zenity --password --title="Configuration rclone" 2>/dev/null) || json_error cancelled
+  p=$(zenity --password --title="rclone configuration password" 2>/dev/null) || json_error cancelled
   [[ -n $p ]] || json_error cancelled
   if ! RCLONE_CONFIG_PASS="$p" rclone listremotes --ask-password=false </dev/null >/dev/null 2>&1; then
     json_error badPassword
