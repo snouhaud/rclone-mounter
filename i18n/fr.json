@@ -55,5 +55,12 @@
   "alert.zenityMissingHelp": "zenity affiche la demande de mot de passe pour déverrouiller la configuration rclone (omarchy pkg add zenity).",
   "error.secretToolMissing": "secret-tool n'est pas installé : installe libsecret",
   "error.zenityMissing": "zenity n'est pas installé",
-  "error.jqMissing": "jq n'est pas installé"
+  "error.jqMissing": "jq n'est pas installé",
+  "forget.title": "Oublier le mot de passe du trousseau",
+  "forget.confirm": "Cliquer à nouveau pour supprimer le mot de passe",
+  "forget.working": "Suppression…",
+  "forget.help": "Supprime le mot de passe de la configuration rclone du trousseau. Les montages en cours continuent ; il sera redemandé la prochaine fois.",
+  "alert.badPassword": "Le mot de passe enregistré ne fonctionne pas",
+  "alert.badPasswordHelp": "Le mot de passe du trousseau ne déverrouille plus la configuration rclone. Saisis-le à nouveau, ou oublie-le ci-dessous.",
+  "error.forgetFailed": "Impossible de supprimer le mot de passe du trousseau"
 }

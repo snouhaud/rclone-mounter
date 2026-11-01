@@ -17,6 +17,8 @@ Item {
   // noConfig, noRemotes, and (only while locked) secretToolMissing, zenityMissing.
   property var issues: []
   property string configPath: ""
+  // A config password is stored in the Secret Service keyring.
+  property bool keyringStored: false
   property string lastError: ""
   property string lastErrorDetail: ""
   // Remote currently being mounted/unmounted ("" when idle), or "*unlock*".
@@ -30,7 +32,7 @@ Item {
   // Problems that prevent listing remotes at all.
   readonly property bool blocked: rcloneMissing || noConfig
   readonly property bool canMount: !blocked && !fuseMissing && !locked
-  readonly property var knownIssues: ["rcloneMissing", "fuseMissing", "noConfig", "noRemotes", "secretToolMissing", "zenityMissing"]
+  readonly property var knownIssues: ["rcloneMissing", "fuseMissing", "noConfig", "noRemotes", "secretToolMissing", "zenityMissing", "badPassword"]
   readonly property int mountedCount: {
     var n = 0
     for (var i = 0; i < remotes.length; i++) if (remotes[i].mounted) n++
@@ -100,6 +102,7 @@ Item {
     locked = obj.locked === true
     base = String(obj.base || "").substring(0, 512)
     configPath = String(obj.configPath || "").substring(0, 512)
+    keyringStored = obj.keyringStored === true
     var found = []
     var raw = Array.isArray(obj.issues) ? obj.issues.slice(0, 8) : []
     for (var k = 0; k < raw.length; k++) {
@@ -168,6 +171,11 @@ Item {
 
   function unlock() {
     runAction(["bash", helperPath, "unlock"], "*unlock*")
+  }
+
+  // Delete the stored config password from the keyring.
+  function forgetPassword() {
+    runAction(["bash", helperPath, "forget"], "*forget*")
   }
 
   function openFolder(remote) {

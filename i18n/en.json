@@ -55,5 +55,12 @@
   "alert.zenityMissingHelp": "zenity shows the password prompt used to unlock the rclone configuration (omarchy pkg add zenity).",
   "error.secretToolMissing": "secret-tool is not installed: install libsecret",
   "error.zenityMissing": "zenity is not installed",
-  "error.jqMissing": "jq is not installed"
+  "error.jqMissing": "jq is not installed",
+  "forget.title": "Forget the keyring password",
+  "forget.confirm": "Click again to delete the password",
+  "forget.working": "Deleting…",
+  "forget.help": "Removes the rclone config password from the keyring. Current mounts keep working; you will be asked for it again next time.",
+  "alert.badPassword": "The stored password does not work",
+  "alert.badPasswordHelp": "The password in the keyring no longer unlocks the rclone configuration. Enter it again, or forget it below.",
+  "error.forgetFailed": "Could not delete the password from the keyring"
 }

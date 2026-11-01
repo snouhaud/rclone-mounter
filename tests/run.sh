@@ -120,6 +120,32 @@ check "unknown remote is refused" '.error == "unknownRemote"' "$(run bin-full mo
 check "unknown command is refused" '.error == "usage"' "$(run bin-full rm -rf /)"
 check "unmounting something not mounted is a no-op" '.ok and .already' "$(run bin-full unmount "$BASE" gdrive)"
 
+echo "keyring password (forget)"
+make_bin bin-keyring rclone fusermount3 zenity
+cat >"$WORK/bin-keyring/secret-tool" <<KEYRING
+#!/bin/bash
+# Stateful fake: the stored password lives in $WORK/secret.
+case "\$1" in
+  lookup) cat "$WORK/secret" 2>/dev/null ;;
+  clear) rm -f "$WORK/secret" ;;
+  store) cat >"$WORK/secret" ;;
+esac
+KEYRING
+chmod +x "$WORK/bin-keyring/secret-tool"
+printf 'gdrive:  drive\n' >"$REMOTES"
+echo hunter2 >"$WORK/secret"
+check "a stored, working password is reported" '.keyringStored == true and .locked == false' "$(run bin-keyring status "$BASE" '' '')"
+touch "$WORK/locked"
+check "a stored password that fails is reported as badPassword" \
+  '.locked == true and .keyringStored == true and (.issues | index("badPassword"))' "$(run bin-keyring status "$BASE" '' '')"
+check "forget deletes the password" '.ok == true and .action == "forget"' "$(run bin-keyring forget)"
+[[ ! -e $WORK/secret ]] && ok "the keyring entry is gone" || ko "the keyring entry is gone"
+check "after forget the config is locked, nothing stored" \
+  '.locked == true and .keyringStored == false and ((.issues | index("badPassword")) | not)' "$(run bin-keyring status "$BASE" '' '')"
+check "forget refuses without secret-tool" '.error == "secretToolMissing"' "$(run bin-no-keyring forget)"
+rm -f "$WORK/locked"
+check "no stored password on a plain config" '.keyringStored == false and .locked == false' "$(run bin-keyring status "$BASE" '' '')"
+
 echo "language (English by default, French when Omarchy or the system is French)"
 if command -v node >/dev/null 2>&1; then
   node_out=$(node -e '
