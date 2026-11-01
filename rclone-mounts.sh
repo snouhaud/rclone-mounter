@@ -1,0 +1,252 @@
+#!/bin/bash
+# Backend for the snouhaud.rclone-mounts Omarchy shell plugin.
+# Adapted from ~/.local/bin/rclone-manager (same keyring entry, same VFS modes
+# and mount options) but non-interactive: every command prints one JSON line.
+#
+#   rclone-mounts.sh status  <base> <excluded,csv> <readonly,csv>
+#   rclone-mounts.sh mount   <base> <remote> <full|writes|read-only> <readonly,csv> <open:0|1>
+#   rclone-mounts.sh unmount <base> <remote>
+#   rclone-mounts.sh unlock
+#
+# Arguments arrive as argv from QML (never through a shell string) and are
+# validated here before use.
+
+export LC_ALL=C.UTF-8
+set -o pipefail
+
+json_error() {
+  jq -cn --arg code "$1" --arg detail "${2:-}" '{ok: false, error: $code, detail: ($detail | .[0:300])}'
+  exit 0
+}
+
+command -v jq >/dev/null 2>&1 || { echo '{"ok":false,"error":"jqMissing"}'; exit 0; }
+
+# --- Prerequisites ----------------------------------------------------------
+have_rclone() { command -v rclone >/dev/null 2>&1; }
+have_fuse() { command -v fusermount3 >/dev/null 2>&1 && [[ -c /dev/fuse ]]; }
+
+# Sets CONFIG_PATH; succeeds when the rclone config file exists and is non-empty.
+# Honors RCLONE_CONFIG through rclone itself.
+have_config() {
+  CONFIG_PATH=$(rclone config file 2>/dev/null | tail -n 1)
+  [[ -n $CONFIG_PATH && -s $CONFIG_PATH ]]
+}
+
+require_rclone() { have_rclone || json_error rcloneMissing; }
+require_fuse() { have_fuse || json_error fuseMissing; }
+require_config() { have_config || json_error noConfig "$CONFIG_PATH"; }
+
+# Status reply when a prerequisite blocks listing remotes.
+status_blocked() {
+  printf '%s\n' "$@" | jq -cRs --arg base "$BASE" --arg config "${CONFIG_PATH:-}" \
+    '{ok: true, locked: false, base: $base, configPath: $config,
+      issues: (split("\n") | map(select(. != ""))), remotes: []}'
+  exit 0
+}
+
+# Sets BASE (no subshell, so json_error really ends the script).
+expand_base() {
+  local base="${1:-$HOME/mnt}"
+  [[ -z $base ]] && base="$HOME/mnt"
+  [[ $base == "~" ]] && base="$HOME"
+  [[ $base == "~/"* ]] && base="$HOME/${base#\~/}"
+  [[ $base == /* ]] || json_error invalidBase "$base"
+  BASE="${base%/}"
+}
+
+valid_remote() {
+  [[ $1 =~ ^[A-Za-z0-9_][A-Za-z0-9_.@+-]{0,63}$ ]]
+}
+
+in_csv() {
+  local needle="$1" csv="$2" item
+  IFS=',' read -ra items <<<"$csv"
+  for item in "${items[@]}"; do
+    item="${item#"${item%%[![:space:]]*}"}"
+    item="${item%"${item##*[![:space:]]}"}"
+    [[ $item == "$needle" ]] && return 0
+  done
+  return 1
+}
+
+# Password: GNOME keyring only. Prompting happens in `unlock`, never in status.
+load_password() {
+  local p
+  p=$(secret-tool lookup service rclone key config 2>/dev/null)
+  [[ -n $p ]] || return 1
+  export RCLONE_CONFIG_PASS="$p"
+}
+
+list_remotes() {
+  # Prints "name<TAB>type" lines.
+  rclone listremotes --long --ask-password=false </dev/null 2>/dev/null | awk '{ n=$1; sub(/:$/, "", n); print n "\t" $2 }'
+}
+
+cmd_status() {
+  local base excluded readonly_csv
+  expand_base "$1"; base="$BASE"
+  excluded="$2"
+  readonly_csv="$3"
+
+  local issues=()
+  have_rclone || status_blocked rcloneMissing
+  have_fuse || issues+=(fuseMissing)
+  have_config || status_blocked "${issues[@]}" noConfig
+
+  # A plain (unencrypted) config works without a password.
+  load_password
+  local listing
+  if ! listing=$(list_remotes); then
+    if [[ -z ${RCLONE_CONFIG_PASS:-} ]]; then
+      printf '%s\n' "${issues[@]}" | jq -cRs --arg base "$base" --arg config "$CONFIG_PATH" \
+        '{ok: true, locked: true, base: $base, configPath: $config,
+          issues: (split("\n") | map(select(. != ""))), remotes: []}'
+      exit 0
+    fi
+    json_error badPassword
+  fi
+  [[ -n $listing ]] || issues+=(noRemotes)
+
+  local name type mounted mode rows=()
+  while IFS=$'\t' read -r name type; do
+    [[ -z $name ]] && continue
+    valid_remote "$name" || continue
+    in_csv "$name" "$excluded" && continue
+    mounted=false
+    mode=""
+    if mountpoint -q "$base/$name" 2>/dev/null; then
+      mounted=true
+      mode=$(head -c 16 "$base/.$name.mode" 2>/dev/null)
+    fi
+    forced=false
+    in_csv "$name" "$readonly_csv" && forced=true
+    rows+=("$(jq -cn --arg name "$name" --arg type "$type" --arg path "$base/$name" \
+      --arg mode "$mode" --argjson mounted "$mounted" --argjson forced "$forced" \
+      '{name: $name, type: $type, path: $path, mounted: $mounted, mode: $mode, forcedReadOnly: $forced}')")
+  done <<<"$listing"
+
+  ((${#rows[@]})) || rows=("null")
+  local issues_json
+  issues_json=$(printf '%s\n' "${issues[@]}" | jq -cRs 'split("\n") | map(select(. != ""))')
+  printf '%s\n' "${rows[@]}" | jq -cs --arg base "$base" --arg config "$CONFIG_PATH" \
+    --argjson issues "$issues_json" \
+    '{ok: true, locked: false, base: $base, configPath: $config, issues: $issues,
+      remotes: map(select(. != null))}'
+}
+
+cmd_mount() {
+  local base name mode readonly_csv open_after
+  expand_base "$1"; base="$BASE"
+  name="$2"
+  mode="$3"
+  readonly_csv="$4"
+  open_after="$5"
+
+  valid_remote "$name" || json_error invalidName "$name"
+  case "$mode" in full|writes|read-only) ;; *) json_error invalidMode "$mode" ;; esac
+  in_csv "$name" "$readonly_csv" && mode="read-only"
+
+  require_rclone
+  require_fuse
+  require_config
+  load_password
+  list_remotes | cut -f1 | grep -qxF -- "$name" || json_error unknownRemote "$name"
+
+  local target="$base/$name"
+  local state="$base/.$name.mode"
+  if mountpoint -q "$target" 2>/dev/null; then
+    jq -cn --arg name "$name" '{ok: true, action: "mount", name: $name, already: true}'
+    exit 0
+  fi
+
+  local opts=(
+    --umask 077
+    --dir-cache-time 30s
+    --poll-interval 0
+    --attr-timeout 1s
+    --timeout 30s
+    --contimeout 15s
+    --low-level-retries 3
+    --retries 2
+    --daemon
+    --daemon-timeout 60s
+    --sftp-idle-timeout 30s
+  )
+  case "$mode" in
+    full)
+      opts+=(--vfs-cache-mode full --vfs-cache-max-size 5G --vfs-cache-max-age 24h) ;;
+    writes)
+      opts+=(--vfs-cache-mode writes --vfs-read-chunk-size 32M
+             --vfs-read-chunk-size-limit 512M --buffer-size 64M) ;;
+    read-only)
+      opts+=(--read-only --vfs-cache-mode writes --vfs-read-chunk-size 32M
+             --vfs-read-chunk-size-limit 512M) ;;
+  esac
+
+  mkdir -p -- "$target" || json_error mountFailed "mkdir $target"
+  local err
+  err=$(timeout 90 rclone mount "$name:" "$target" "${opts[@]}" 2>&1)
+
+  local i
+  for i in 1 2 3 4 5 6 7 8 9 10; do
+    mountpoint -q "$target" && break
+    sleep 0.5
+  done
+
+  if mountpoint -q "$target"; then
+    printf '%s' "$mode" >"$state"
+    notify-send "rclone" "$name → $target ($mode)" 2>/dev/null
+    [[ $open_after == 1 ]] && setsid -f env -u LC_ALL xdg-open "$target" >/dev/null 2>&1
+    jq -cn --arg name "$name" --arg mode "$mode" '{ok: true, action: "mount", name: $name, mode: $mode}'
+  else
+    rmdir -- "$target" 2>/dev/null
+    json_error mountFailed "$(printf '%s' "$err" | tail -3)"
+  fi
+}
+
+cmd_unmount() {
+  local base name
+  expand_base "$1"; base="$BASE"
+  name="$2"
+  valid_remote "$name" || json_error invalidName "$name"
+
+  local target="$base/$name"
+  if mountpoint -q "$target" 2>/dev/null; then require_fuse; fi
+  if ! mountpoint -q "$target" 2>/dev/null; then
+    rm -f -- "$base/.$name.mode"
+    jq -cn --arg name "$name" '{ok: true, action: "unmount", name: $name, already: true}'
+    exit 0
+  fi
+
+  local err
+  if err=$(fusermount3 -uz -- "$target" 2>&1); then
+    rm -f -- "$base/.$name.mode"
+    rmdir -- "$target" 2>/dev/null
+    notify-send "rclone" "$name démonté" 2>/dev/null
+    jq -cn --arg name "$name" '{ok: true, action: "unmount", name: $name}'
+  else
+    json_error unmountFailed "$err"
+  fi
+}
+
+cmd_unlock() {
+  require_rclone
+  require_config
+  local p
+  p=$(zenity --password --title="Configuration rclone" 2>/dev/null) || json_error cancelled
+  [[ -n $p ]] || json_error cancelled
+  if ! RCLONE_CONFIG_PASS="$p" rclone listremotes --ask-password=false </dev/null >/dev/null 2>&1; then
+    json_error badPassword
+  fi
+  printf '%s' "$p" | secret-tool store --label="rclone config" service rclone key config ||
+    json_error keyringFailed
+  jq -cn '{ok: true, action: "unlock"}'
+}
+
+case "${1:-}" in
+  status) shift; cmd_status "$@" ;;
+  mount) shift; cmd_mount "$@" ;;
+  unmount) shift; cmd_unmount "$@" ;;
+  unlock) cmd_unlock ;;
+  *) json_error usage "$1" ;;
+esac
