@@ -1,26 +1,105 @@
-# rclone mounts (snouhaud.rclone-mounts)
+# rclone mounter
 
-Omarchy bar widget inspired by `~/.local/bin/rclone-manager`: lists rclone
-remotes, mounts/unmounts them under `~/mnt/<remote>` with the same three VFS
-modes (Complet / Flux / Lecture seule) and the same mount options.
+An [Omarchy](https://omarchy.org) bar widget that lists your
+[rclone](https://rclone.org) remotes and mounts or unmounts them in one click.
 
-- Password: read from the GNOME keyring (`service rclone key config`), same
-  entry as rclone-manager. If missing, the panel offers an unlock row (zenity).
-- Prerequisite checks on every refresh, shown as red alerts in the panel
-  (and a red `!` on the bar icon):
-  - rclone missing → button runs `omarchy pkg add rclone` in a terminal;
-  - FUSE 3 missing (`fusermount3` or `/dev/fuse`) → `omarchy pkg add fuse3`,
-    mount switches are disabled;
-  - rclone config missing or empty, or no remote in it → button runs `rclone config`.
-- Bar icon: cloud outline (dim) when nothing is mounted, cloud-check plus the
-  count when something is. Left click opens the panel, right click refreshes.
-- Panel keys: ↑/↓ move, ←/→ change mode, Enter mount/unmount, `m` cycle mode,
-  `o` open folder, `r` refresh, `u` unlock, `c` run `rclone config`.
-- Settings (Omarchy settings panel or `omarchy bar set snouhaud.rclone-mounts <key> <value>`):
-  `mountBase`, `defaultMode`, `excludedRemotes`, `readOnlyRemotes`,
-  `openAfterMount`, `showCount`, `refreshIntervalSec`.
-- IPC: `omarchy-shell snouhaud.rclone-mounts status|refresh|toggle|mount <remote> <mode>|unmount <remote>`.
+![rclone mounter panel](preview.png)
 
-Install / move: `./install.sh [left|centerBegin|centerEnd|right|tray]`
-(asks with gum when no section is given). When installed from git with
-`omarchy plugin add`, Omarchy asks for the section itself (default: right).
+- One switch per remote; mounts go to `~/mnt/<remote>` (configurable).
+- Three VFS cache modes, picked in the panel before mounting:
+  - **Full**: `--vfs-cache-mode full` (5 GB / 24 h cache). Files are fully
+    downloaded before reading, writes are safe.
+  - **Streaming**: `--vfs-cache-mode writes` with chunked reads. Best for media.
+  - **Read-only**: `--read-only`. The remote cannot be modified.
+- Remotes can be hidden, or forced read-only (useful for a backup repository).
+- Encrypted rclone configs are unlocked with a password kept in the keyring.
+- Checks its prerequisites and shows an alert with a fix-it button when
+  something is missing: rclone, FUSE 3, an rclone config or a remote, and
+  (for encrypted configs) `secret-tool` and `zenity`.
+- Follows the Omarchy theme and language (English and French included).
+
+## Install
+
+```bash
+omarchy plugin add https://github.com/snouhaud/rclone-mounter.git --enable
+```
+
+Omarchy asks where to put the widget in the bar (default: right).
+Move it later with `omarchy bar move snouhaud.rclone-mounts --section <section>`.
+
+### Requirements
+
+| Package    | Why                                                      |
+|------------|----------------------------------------------------------|
+| `rclone`   | lists and mounts remotes                                 |
+| `fuse3`    | `fusermount3` and `/dev/fuse`, needed to mount           |
+| `jq`       | used by the helper script (shipped with Omarchy)         |
+| `libsecret`, `zenity` | only for an encrypted rclone config           |
+| `libnotify` | optional, desktop notifications on mount/unmount        |
+
+Create remotes with `rclone config` if you have none yet.
+
+## Use
+
+- **Bar icon**: dim cloud when nothing is mounted; cloud with a check mark and
+  the number of mounts otherwise; red `!` when a prerequisite is missing.
+  Left click opens the panel, right click refreshes.
+- **Panel keys**: `↑`/`↓` move, `←`/`→` change mode, `Enter` mount/unmount,
+  `m` cycle mode, `o` open the mounted folder, `r` refresh, `u` unlock,
+  `c` run `rclone config`.
+
+### Encrypted rclone config
+
+The password is read from the Secret Service keyring (GNOME Keyring, KeePassXC…)
+under the attributes `service rclone key config`. If it is not there, the panel
+shows an **Unlock** row that asks for it with zenity, checks it, and stores it.
+To store it yourself:
+
+```bash
+secret-tool store --label="rclone config" service rclone key config
+```
+
+## Settings
+
+Change them in the Omarchy settings panel, or with
+`omarchy bar set snouhaud.rclone-mounts <key> <value>`:
+
+| Key                  | Default | Meaning                                         |
+|----------------------|---------|-------------------------------------------------|
+| `mountBase`          | `~/mnt` | folder that holds the mount points              |
+| `defaultMode`        | `full`  | `full`, `writes` or `read-only`                 |
+| `excludedRemotes`    | empty   | comma-separated remotes to hide                 |
+| `readOnlyRemotes`    | empty   | comma-separated remotes always mounted read-only|
+| `openAfterMount`     | `true`  | open the folder after mounting                  |
+| `showCount`          | `true`  | show the number of mounts next to the icon      |
+| `refreshIntervalSec` | `30`    | how often the state is refreshed                |
+
+The mode used for each mount is remembered in `<mountBase>/.<remote>.mode`.
+
+## IPC
+
+```bash
+omarchy-shell snouhaud.rclone-mounts status          # one line per remote
+omarchy-shell snouhaud.rclone-mounts mount gdrive writes
+omarchy-shell snouhaud.rclone-mounts unmount gdrive
+omarchy-shell snouhaud.rclone-mounts refresh | toggle | open | close
+```
+
+## How it works and safety
+
+`Panel.qml` (UI) and `Service.qml` (state) call `rclone-mounts.sh`, which prints
+one JSON line per command. Arguments are passed as argv, never through a shell
+string. Remote names, modes and the mount folder are validated before use, and
+all text is rendered as plain text. The plugin makes no network request of its
+own; only rclone talks to your remotes. The only commands it launches in a
+terminal are fixed ones (`omarchy pkg add <package>`, `rclone config`).
+
+Run the tests (no network, no real mount; rclone is faked):
+
+```bash
+tests/run.sh
+```
+
+## License
+
+MIT, see [LICENSE](LICENSE).
