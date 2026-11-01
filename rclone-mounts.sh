@@ -1,5 +1,5 @@
 #!/bin/bash
-# Backend for the snouhaud.rclone-mounts Omarchy shell plugin.
+# Backend for the io.github.snouhaud.rclone-mounter Omarchy shell plugin.
 # Non-interactive (except `unlock`): every command prints one JSON line.
 #
 # An encrypted rclone config is unlocked with the password stored in the

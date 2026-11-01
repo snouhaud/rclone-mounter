@@ -1,8 +1,8 @@
 {
   "schemaVersion": 1,
-  "id": "snouhaud.rclone-mounts",
-  "name": "rclone mounts",
-  "version": "1.2.0",
+  "id": "io.github.snouhaud.rclone-mounter",
+  "name": "rclone mounter",
+  "version": "2.0.0",
   "author": "Stéphane Nouhaud (snouhaud)",
   "license": "MIT",
   "description": "List rclone remotes and mount or unmount them from the Omarchy bar, with full, streaming (writes) or read-only VFS cache modes.",
@@ -13,7 +13,7 @@
     "barWidget": "Panel.qml"
   },
   "barWidget": {
-    "displayName": "rclone mounts",
+    "displayName": "rclone mounter",
     "description": "Mount and unmount rclone remotes, pick the VFS cache mode, and open mounted folders.",
     "category": "Files",
     "allowMultiple": false,

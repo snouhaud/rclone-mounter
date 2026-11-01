@@ -30,7 +30,7 @@ omarchy plugin add https://github.com/snouhaud/rclone-mounter.git --enable
 ```
 
 Omarchy asks where to put the widget in the bar (default: right).
-Move it later with `omarchy bar move snouhaud.rclone-mounts --section <section>`.
+Move it later with `omarchy bar move io.github.snouhaud.rclone-mounter --section <section>`.
 
 ### Requirements
 
@@ -43,6 +43,27 @@ Move it later with `omarchy bar move snouhaud.rclone-mounts --section <section>`
 | `libnotify` | optional, desktop notifications on mount/unmount        |
 
 Create remotes with `rclone config` if you have none yet.
+
+## Uninstall
+
+1. Unmount your remotes first (switch them off in the panel). Mounts are
+   independent `rclone mount --daemon` processes and stay mounted after the
+   plugin is removed; to unmount one by hand: `fusermount3 -uz ~/mnt/<remote>`.
+2. Remove the plugin. This disables it, takes it out of the bar and deletes
+   its folder:
+
+   ```bash
+   omarchy plugin remove io.github.snouhaud.rclone-mounter
+   ```
+
+3. Optional cleanup. The plugin never edits your rclone configuration. It
+   leaves behind only the mode files `~/mnt/.<remote>.mode`, empty mount
+   folders, and the keyring password if you stored one:
+
+   ```bash
+   rm -f ~/mnt/.*.mode
+   secret-tool clear service rclone key config   # only if nothing else uses it
+   ```
 
 ## Use
 
@@ -76,7 +97,7 @@ secret-tool clear service rclone key config
 
 ## Language
 
-The panel, notifications, password dialog and `install.sh` pick their language
+The panel, notifications and password dialog pick their language
 in this order:
 
 1. the language chosen in Omarchy (Setup > Language, stored in
@@ -91,7 +112,7 @@ and translate the values; plural entries take the CLDR categories `one`/`other`.
 ## Settings
 
 Change them in the Omarchy settings panel, or with
-`omarchy bar set snouhaud.rclone-mounts <key> <value>`:
+`omarchy bar set io.github.snouhaud.rclone-mounter <key> <value>`:
 
 | Key                  | Default | Meaning                                         |
 |----------------------|---------|-------------------------------------------------|
@@ -108,11 +129,11 @@ The mode used for each mount is remembered in `<mountBase>/.<remote>.mode`.
 ## IPC
 
 ```bash
-omarchy-shell snouhaud.rclone-mounts status          # one line per remote
-omarchy-shell snouhaud.rclone-mounts mount gdrive writes
-omarchy-shell snouhaud.rclone-mounts unmount gdrive
-omarchy-shell snouhaud.rclone-mounts forget          # delete the keyring password
-omarchy-shell snouhaud.rclone-mounts refresh | toggle | open | close
+omarchy-shell io.github.snouhaud.rclone-mounter status          # one line per remote
+omarchy-shell io.github.snouhaud.rclone-mounter mount gdrive writes
+omarchy-shell io.github.snouhaud.rclone-mounter unmount gdrive
+omarchy-shell io.github.snouhaud.rclone-mounter forget          # delete the keyring password
+omarchy-shell io.github.snouhaud.rclone-mounter refresh | toggle | open | close
 ```
 
 ## How it works and safety

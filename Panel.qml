@@ -8,8 +8,8 @@ import qs.Ui
 
 Panel {
   id: root
-  moduleName: "snouhaud.rclone-mounts"
-  ipcTarget: "snouhaud.rclone-mounts"
+  moduleName: "io.github.snouhaud.rclone-mounter"
+  ipcTarget: "io.github.snouhaud.rclone-mounter"
   manageIpc: false
 
   readonly property Item panelFlick: panel.loadedContent ? panel.loadedContent.panelFlick : null

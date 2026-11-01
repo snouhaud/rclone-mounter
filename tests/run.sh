@@ -1,5 +1,5 @@
 #!/bin/bash
-# Regression tests for the rclone mounts plugin. No network, no real mounts:
+# Regression tests for the rclone mounter plugin. No network, no real mounts:
 # rclone is replaced by a fake binary on PATH.
 #   tests/run.sh
 set -uo pipefail
