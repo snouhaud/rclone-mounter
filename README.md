@@ -16,6 +16,9 @@ An [Omarchy](https://omarchy.org) bar widget that lists your
 - Checks its prerequisites and shows an alert with a fix-it button when
   something is missing: rclone, FUSE 3, an rclone config or a remote, and
   (for encrypted configs) `secret-tool` and `zenity`.
+
+  ![Prerequisite alerts](alerts.png)
+
 - Follows the Omarchy theme. English by default, French when the Omarchy
   language is French, or (with no Omarchy language set) when the system
   locale is (`LC_ALL`, `LC_MESSAGES`, then `LANG`). See [Language](#language).
