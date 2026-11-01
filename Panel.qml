@@ -19,6 +19,9 @@ Panel {
   property int cursorPos: 0
   // Mode used for the next mount; starts at the configured default.
   property string mode: rclone.defaultMode
+  // Two-step confirmation for forgetting the keyring password.
+  property bool forgetArmed: false
+  readonly property bool showForget: rclone.keyringStored && !rclone.blocked
 
   readonly property var modes: ["full", "writes", "read-only"]
   readonly property color foreground: bar ? bar.foreground : Commons.Color.foreground
@@ -38,6 +41,7 @@ Panel {
   readonly property string glyphAlert: String.fromCodePoint(0xF002A)      // alert-outline
   readonly property string glyphDownload: String.fromCodePoint(0xF01DA)   // download
   readonly property string glyphCog: String.fromCodePoint(0xF0493)        // cog
+  readonly property string glyphKeyOff: String.fromCodePoint(0xF0B76)     // key-remove
 
   // English by default; the Omarchy language, else the system locale, when a
   // catalog exists for it (see Strings.qml and Language.js).
@@ -60,6 +64,10 @@ Panel {
                   title: strings.t("alert.noConfig"),
                   help: strings.t("alert.noConfigHelp").arg(rclone.configPath !== "" ? rclone.configPath : "~/.config/rclone/rclone.conf"),
                   actionLabel: strings.t("alert.configure") })
+    if (rclone.issues.indexOf("badPassword") !== -1)
+      list.push({ code: "badPassword", action: "unlock", glyph: glyphLock,
+                  title: strings.t("alert.badPassword"), help: strings.t("alert.badPasswordHelp"),
+                  actionLabel: strings.t("unlock.title") })
     if (rclone.issues.indexOf("secretToolMissing") !== -1)
       list.push({ code: "secretToolMissing", action: "installSecretTool", glyph: glyphDownload,
                   title: strings.t("alert.secretToolMissing"), help: strings.t("alert.secretToolMissingHelp"),
@@ -84,6 +92,7 @@ Panel {
       t.push({ section: "mode", index: 0 })
       for (var j = 0; j < rclone.remotes.length; j++) t.push({ section: "remotes", index: j })
     }
+    if (showForget) t.push({ section: "forget", index: 0 })
     return t
   }
   readonly property var cursorTarget: cursorTargets.length > 0
@@ -116,6 +125,7 @@ Panel {
     else if (action === "configure") rclone.configureRclone()
     else if (action === "installSecretTool") rclone.installSecretTool()
     else if (action === "installZenity") rclone.installZenity()
+    else if (action === "unlock") { rclone.unlock(); return }
     else return
     root.close()
   }
@@ -182,6 +192,16 @@ Panel {
     else if (c.section === "unlock") rclone.unlock()
     else if (c.section === "mode") cycleMode(1)
     else if (c.section === "remotes") rclone.toggle(rclone.remotes[c.index], mode)
+    else if (c.section === "forget") forgetPressed()
+  }
+
+  // First press arms, second press (within 4 s) deletes the password.
+  function forgetPressed() {
+    if (rclone.busy || !rclone.keyringStored) return
+    if (!forgetArmed) { forgetArmed = true; forgetDisarm.restart(); return }
+    forgetArmed = false
+    forgetDisarm.stop()
+    rclone.forgetPassword()
   }
 
   function scrollCursorIntoView() {
@@ -208,6 +228,7 @@ Panel {
   implicitHeight: button.implicitHeight
 
   onOpenedChanged: if (opened) {
+    forgetArmed = false
     cursorActive = false
     cursorPos = 0
     if (panelFlick) panelFlick.contentY = 0
@@ -221,6 +242,12 @@ Panel {
     settings: root.settings
   }
 
+  Timer {
+    id: forgetDisarm
+    interval: 4000
+    onTriggered: root.forgetArmed = false
+  }
+
   ShellIpc {
     target: root.ipcTarget
     function open(): void { root.open() }
@@ -231,6 +258,7 @@ Panel {
     function refresh(): string { rclone.refresh(); return "ok" }
     function mount(name: string, mode: string): string { rclone.mount(name, mode); return "ok" }
     function unmount(name: string): string { rclone.unmount(name); return "ok" }
+    function forget(): string { rclone.forgetPassword(); return "ok" }
     function status(): string {
       var out = []
       for (var k = 0; k < rclone.issues.length; k++) out.push("issue\t" + rclone.issues[k])
@@ -287,6 +315,7 @@ Panel {
         else if (t === "m" || t === "M") root.cycleMode(1)
         else if (t === "o" || t === "O") rclone.openFolder(root.selectedRemote())
         else if (t === "u" || t === "U") { if (rclone.locked) rclone.unlock() }
+        else if (t === "f" || t === "F") { if (root.showForget) { root.setCursor("forget", 0); root.forgetPressed() } }
         else if (t === "c" || t === "C") { if (rclone.noConfig || rclone.issues.indexOf("noRemotes") !== -1) root.runAlertAction("configure") }
       }
 
@@ -447,6 +476,16 @@ Panel {
               }
             }
           }
+
+          PanelSeparator {
+            visible: root.showForget
+            foreground: root.foreground
+          }
+
+          ForgetRow {
+            visible: root.showForget
+            width: parent.width
+          }
         }
       }
     }
@@ -520,6 +559,66 @@ Panel {
         Layout.alignment: Qt.AlignVCenter
         onHovered: function(on) { if (on) root.setCursor("alert", alertRow.rowIndex) }
         onClicked: root.runAlertAction(alertRow.alert.action)
+      }
+    }
+  }
+
+  component ForgetRow: CursorSurface {
+    id: forgetRow
+    hasCursor: root.cursorIs("forget", 0)
+    foreground: root.forgetArmed ? root.urgent : root.foreground
+    implicitHeight: forgetLayout.implicitHeight + Style.spacing.rowPaddingX
+
+    MouseArea {
+      anchors.fill: parent
+      hoverEnabled: true
+      enabled: !rclone.busy
+      cursorShape: Qt.PointingHandCursor
+      onEntered: root.setCursor("forget", 0)
+      onClicked: root.forgetPressed()
+    }
+
+    RowLayout {
+      id: forgetLayout
+      anchors.left: parent.left
+      anchors.right: parent.right
+      anchors.verticalCenter: parent.verticalCenter
+      anchors.leftMargin: Style.space(10)
+      anchors.rightMargin: Style.space(4)
+      spacing: Style.space(8)
+
+      Text {
+        textFormat: Text.PlainText
+        text: root.glyphKeyOff
+        color: root.forgetArmed ? root.urgent : root.foreground
+        opacity: root.forgetArmed ? 1.0 : 0.7
+        font.family: root.fontFamily
+        font.pixelSize: Style.font.icon
+        Layout.alignment: Qt.AlignVCenter
+      }
+
+      ColumnLayout {
+        Layout.fillWidth: true
+        spacing: Style.space(1)
+        Text {
+          textFormat: Text.PlainText
+          Layout.fillWidth: true
+          text: rclone.busyRemote === "*forget*" ? strings.t("forget.working")
+            : root.forgetArmed ? strings.t("forget.confirm") : strings.t("forget.title")
+          color: root.forgetArmed ? root.urgent : root.foreground
+          font.family: root.fontFamily
+          font.pixelSize: Style.font.body
+          elide: Text.ElideRight
+        }
+        Text {
+          textFormat: Text.PlainText
+          Layout.fillWidth: true
+          text: strings.t("forget.help")
+          color: root.dim
+          font.family: root.fontFamily
+          font.pixelSize: Style.font.caption
+          wrapMode: Text.WordWrap
+        }
       }
     }
   }

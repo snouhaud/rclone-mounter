@@ -10,6 +10,7 @@
 #   rclone-mounts.sh mount   <base> <remote> <full|writes|read-only> <readonly,csv> <open:0|1>
 #   rclone-mounts.sh unmount <base> <remote>
 #   rclone-mounts.sh unlock
+#   rclone-mounts.sh forget        # delete the stored password from the keyring
 #
 # Arguments arrive as argv from QML (never through a shell string) and are
 # validated here before use.
@@ -53,6 +54,7 @@ msg() {
     mounted) ((fr)) && printf '%s monté sur %s (%s)' "$@" || printf 'Mounted %s at %s (%s)' "$@" ;;
     unmounted) ((fr)) && printf '%s démonté' "$@" || printf 'Unmounted %s' "$@" ;;
     password) ((fr)) && printf 'Mot de passe de la configuration rclone' || printf 'rclone configuration password' ;;
+    forgotten) ((fr)) && printf 'Mot de passe rclone supprimé du trousseau' || printf 'rclone password removed from the keyring' ;;
   esac
 }
 
@@ -78,9 +80,19 @@ require_zenity() { have_zenity || json_error zenityMissing; }
 # Status reply when a prerequisite blocks listing remotes.
 status_blocked() {
   printf '%s\n' "$@" | jq -cRs --arg base "$BASE" --arg config "${CONFIG_PATH:-}" \
-    '{ok: true, locked: false, base: $base, configPath: $config,
+    --argjson stored "$(keyring_stored_json)" \
+    '{ok: true, locked: false, base: $base, configPath: $config, keyringStored: $stored,
       issues: (split("\n") | map(select(. != ""))), remotes: []}'
   exit 0
+}
+
+# "true" when a config password is stored in the keyring, else "false".
+keyring_stored_json() {
+  if have_secret_tool && [[ -n $(secret-tool lookup service rclone key config 2>/dev/null) ]]; then
+    echo true
+  else
+    echo false
+  fi
 }
 
 # Sets BASE (no subshell, so json_error really ends the script).
@@ -137,16 +149,20 @@ cmd_status() {
   load_password
   local listing
   if ! listing=$(list_remotes); then
-    if [[ -z ${RCLONE_CONFIG_PASS:-} ]]; then
-      # Locked: unlocking needs a keyring client and a password dialog.
-      have_secret_tool || issues+=(secretToolMissing)
-      have_zenity || issues+=(zenityMissing)
-      printf '%s\n' "${issues[@]}" | jq -cRs --arg base "$base" --arg config "$CONFIG_PATH" \
-        '{ok: true, locked: true, base: $base, configPath: $config,
-          issues: (split("\n") | map(select(. != ""))), remotes: []}'
-      exit 0
+    # Locked: no stored password, or a stored one that no longer works.
+    # Unlocking needs a keyring client and a password dialog.
+    local stored=false
+    if [[ -n ${RCLONE_CONFIG_PASS:-} ]]; then
+      stored=true
+      issues+=(badPassword)
     fi
-    json_error badPassword
+    have_secret_tool || issues+=(secretToolMissing)
+    have_zenity || issues+=(zenityMissing)
+    printf '%s\n' "${issues[@]}" | jq -cRs --arg base "$base" --arg config "$CONFIG_PATH" \
+      --argjson stored "$stored" \
+      '{ok: true, locked: true, base: $base, configPath: $config, keyringStored: $stored,
+        issues: (split("\n") | map(select(. != ""))), remotes: []}'
+    exit 0
   fi
   [[ -n $listing ]] || issues+=(noRemotes)
 
@@ -171,10 +187,12 @@ cmd_status() {
   ((${#rows[@]})) || rows=("null")
   local issues_json
   issues_json=$(printf '%s\n' "${issues[@]}" | jq -cRs 'split("\n") | map(select(. != ""))')
+  local stored=false
+  [[ -n ${RCLONE_CONFIG_PASS:-} ]] && stored=true
   printf '%s\n' "${rows[@]}" | jq -cs --arg base "$base" --arg config "$CONFIG_PATH" \
-    --argjson issues "$issues_json" \
-    '{ok: true, locked: false, base: $base, configPath: $config, issues: $issues,
-      remotes: map(select(. != null))}'
+    --argjson issues "$issues_json" --argjson stored "$stored" \
+    '{ok: true, locked: false, base: $base, configPath: $config, keyringStored: $stored,
+      issues: $issues, remotes: map(select(. != null))}'
 }
 
 cmd_mount() {
@@ -288,10 +306,23 @@ cmd_unlock() {
   jq -cn '{ok: true, action: "unlock"}'
 }
 
+# Delete the stored config password. Running mounts keep working (rclone
+# already decrypted the config); the next mount asks for the password again.
+cmd_forget() {
+  require_secret_tool
+  secret-tool clear service rclone key config 2>/dev/null
+  if [[ -n $(secret-tool lookup service rclone key config 2>/dev/null) ]]; then
+    json_error forgetFailed
+  fi
+  notify "$(msg forgotten)"
+  jq -cn '{ok: true, action: "forget"}'
+}
+
 case "${1:-}" in
   status) shift; cmd_status "$@" ;;
   mount) shift; cmd_mount "$@" ;;
   unmount) shift; cmd_unmount "$@" ;;
   unlock) cmd_unlock ;;
+  forget) cmd_forget ;;
   *) json_error usage "$1" ;;
 esac
