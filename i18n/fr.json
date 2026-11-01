@@ -24,7 +24,7 @@
   "remote.unmount": "Démonter",
   "remote.mountWith": "Monter (%1)",
   "unlock.title": "Déverrouiller la configuration rclone",
-  "unlock.help": "Le mot de passe est conservé dans le trousseau GNOME, comme rclone-manager.",
+  "unlock.help": "Le mot de passe est conservé dans le trousseau (secret-tool : service rclone key config).",
   "error.generic": "La commande rclone a échoué",
   "error.badPassword": "Mot de passe incorrect ou configuration illisible",
   "error.rcloneMissing": "rclone n'est pas installé",
@@ -34,7 +34,7 @@
   "error.unknownRemote": "Remote inconnu",
   "error.keyringFailed": "Impossible d'enregistrer le mot de passe dans le trousseau",
   "error.statusFailed": "Impossible de lire l'état de rclone",
-  "error.parseFailed": "Réponse inattendue de rclone-mounts.sh",
+  "error.parseFailed": "Réponse inattendue du script rclone-mounts.sh",
   "hero.loading": "Vérification…",
   "hero.unavailable": "Indisponible",
   "alert.install": "Installer",
@@ -48,5 +48,12 @@
   "alert.noRemotes": "Aucun remote configuré",
   "alert.noRemotesHelp": "La configuration rclone ne contient encore aucun remote. Ajoutes-en un avec rclone config.",
   "error.fuseMissing": "FUSE 3 n'est pas disponible : installe fuse3",
-  "error.noConfig": "Aucune configuration rclone"
+  "error.noConfig": "Aucune configuration rclone",
+  "alert.secretToolMissing": "secret-tool n'est pas installé",
+  "alert.secretToolMissingHelp": "Ta configuration rclone est chiffrée ; son mot de passe est conservé dans le trousseau via secret-tool. Installe le paquet libsecret (omarchy pkg add libsecret).",
+  "alert.zenityMissing": "zenity n'est pas installé",
+  "alert.zenityMissingHelp": "zenity affiche la demande de mot de passe pour déverrouiller la configuration rclone (omarchy pkg add zenity).",
+  "error.secretToolMissing": "secret-tool n'est pas installé : installe libsecret",
+  "error.zenityMissing": "zenity n'est pas installé",
+  "error.jqMissing": "jq n'est pas installé"
 }

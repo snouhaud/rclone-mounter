@@ -58,6 +58,14 @@ Panel {
                   title: strings.t("alert.noConfig"),
                   help: strings.t("alert.noConfigHelp").arg(rclone.configPath !== "" ? rclone.configPath : "~/.config/rclone/rclone.conf"),
                   actionLabel: strings.t("alert.configure") })
+    if (rclone.issues.indexOf("secretToolMissing") !== -1)
+      list.push({ code: "secretToolMissing", action: "installSecretTool", glyph: glyphDownload,
+                  title: strings.t("alert.secretToolMissing"), help: strings.t("alert.secretToolMissingHelp"),
+                  actionLabel: strings.t("alert.install") })
+    if (rclone.issues.indexOf("zenityMissing") !== -1)
+      list.push({ code: "zenityMissing", action: "installZenity", glyph: glyphDownload,
+                  title: strings.t("alert.zenityMissing"), help: strings.t("alert.zenityMissingHelp"),
+                  actionLabel: strings.t("alert.install") })
     if (rclone.issues.indexOf("noRemotes") !== -1)
       list.push({ code: "noRemotes", action: "configure", glyph: glyphCog,
                   title: strings.t("alert.noRemotes"), help: strings.t("alert.noRemotesHelp"),
@@ -104,6 +112,8 @@ Panel {
     if (action === "installRclone") rclone.installRclone()
     else if (action === "installFuse") rclone.installFuse()
     else if (action === "configure") rclone.configureRclone()
+    else if (action === "installSecretTool") rclone.installSecretTool()
+    else if (action === "installZenity") rclone.installZenity()
     else return
     root.close()
   }
@@ -237,6 +247,7 @@ Panel {
     bar: root.bar
     text: rclone.mountedCount > 0 ? root.glyphCloudOn : root.glyphCloud
     labelText: root.hasAlert ? "!"
+      : rclone.locked ? ""
       : root.showCount && rclone.mountedCount > 0 ? Commons.I18n.formatNumber(rclone.mountedCount) : ""
     foreground: root.hasAlert ? (root.bar ? root.bar.urgent : Commons.Color.urgent)
       : rclone.mountedCount > 0 ? root.barForeground : Qt.darker(root.barForeground, 1.55)
