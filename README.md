@@ -16,7 +16,9 @@ An [Omarchy](https://omarchy.org) bar widget that lists your
 - Checks its prerequisites and shows an alert with a fix-it button when
   something is missing: rclone, FUSE 3, an rclone config or a remote, and
   (for encrypted configs) `secret-tool` and `zenity`.
-- Follows the Omarchy theme and language (English and French included).
+- Follows the Omarchy theme. English by default, French when the Omarchy
+  language is French, or (with no Omarchy language set) when the system
+  locale is (`LC_ALL`, `LC_MESSAGES`, then `LANG`). See [Language](#language).
 
 ## Install
 
@@ -58,6 +60,20 @@ To store it yourself:
 ```bash
 secret-tool store --label="rclone config" service rclone key config
 ```
+
+## Language
+
+The panel, notifications, password dialog and `install.sh` pick their language
+in this order:
+
+1. the language chosen in Omarchy (Setup > Language, stored in
+   `~/.config/omarchy/language`);
+2. otherwise the system locale: `LC_ALL`, then `LC_MESSAGES`, then `LANG`;
+3. English.
+
+A language without a catalog in `i18n/` shows English, string by string.
+To add one, copy `i18n/en.json` to `i18n/<code>.json` (for example `de.json`)
+and translate the values; plural entries take the CLDR categories `one`/`other`.
 
 ## Settings
 
