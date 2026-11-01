@@ -39,7 +39,9 @@ Panel {
   readonly property string glyphDownload: String.fromCodePoint(0xF01DA)   // download
   readonly property string glyphCog: String.fromCodePoint(0xF0493)        // cog
 
-  Commons.Translations { id: strings; directory: Qt.resolvedUrl("i18n") }
+  // English by default; the Omarchy language, else the system locale, when a
+  // catalog exists for it (see Strings.qml and Language.js).
+  Strings { id: strings; directory: Qt.resolvedUrl("i18n") }
 
   // One alert per detected prerequisite problem. `action` is dispatched by
   // runAlertAction(); it never carries text from rclone.

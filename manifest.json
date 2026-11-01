@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "snouhaud.rclone-mounts",
   "name": "rclone mounts",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "author": "Stéphane Nouhaud (snouhaud)",
   "license": "MIT",
   "description": "List rclone remotes and mount or unmount them from the Omarchy bar, with full, streaming (writes) or read-only VFS cache modes.",

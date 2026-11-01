@@ -23,7 +23,7 @@ make_bin() {
   local dir="$WORK/$1"; shift
   mkdir -p "$dir"
   local tool
-  for tool in bash jq awk head tail cut grep sed mountpoint mkdir rmdir rm cat printf env timeout sleep setsid; do
+  for tool in bash jq awk head tail tr cut grep sed mountpoint mkdir rmdir rm cat printf env timeout sleep setsid; do
     local real; real=$(command -v "$tool") && ln -sf "$real" "$dir/$tool"
   done
   for tool in "$@"; do
@@ -119,6 +119,55 @@ check "unknown mode is refused" '.error == "invalidMode"' "$(run bin-full mount 
 check "unknown remote is refused" '.error == "unknownRemote"' "$(run bin-full mount "$BASE" nope full '' 0)"
 check "unknown command is refused" '.error == "usage"' "$(run bin-full rm -rf /)"
 check "unmounting something not mounted is a no-op" '.ok and .already' "$(run bin-full unmount "$BASE" gdrive)"
+
+echo "language (English by default, French when Omarchy or the system is French)"
+if command -v node >/dev/null 2>&1; then
+  node_out=$(node -e '
+    const fs = require("fs");
+    const src = fs.readFileSync(process.argv[1], "utf8").replace(/^\.pragma library\s*/, "");
+    const L = new Function(src + "; return { resolve, base, pluralCategory, normalize };")();
+    const cases = [
+      ["Omarchy fr wins over an English system", L.resolve("fr", "", "", "en_US.UTF-8"), "fr"],
+      ["Omarchy en wins over a French system", L.resolve("en", "", "", "fr_FR.UTF-8"), "en"],
+      ["no Omarchy language: LANG fr_FR.UTF-8 gives fr-FR (fr.json via its base)", L.resolve("", "", "", "fr_FR.UTF-8"), "fr-FR"],
+      ["LC_ALL overrides LANG", L.resolve("", "fr_CA.UTF-8", "", "en_US.UTF-8"), "fr-CA"],
+      ["LC_MESSAGES overrides LANG", L.resolve("", "", "fr_BE@euro", "en_US.UTF-8"), "fr-BE"],
+      ["nothing set gives en", L.resolve("", "", "", ""), "en"],
+      ["C locale gives en", L.resolve("", "", "", "C.UTF-8"), "en"],
+      ["garbage Omarchy value falls through to LANG", L.resolve("<b>", "", "", "fr_FR.UTF-8"), "fr-FR"],
+      ["base of fr-CA is fr", L.base("fr-CA"), "fr"],
+      ["fr plural: 0 is one", L.pluralCategory("fr", 0), "one"],
+      ["fr plural: 2 is other", L.pluralCategory("fr", 2), "other"],
+      ["en plural: 0 is other", L.pluralCategory("en", 0), "other"],
+      ["en plural: 1 is one", L.pluralCategory("en", 1), "one"],
+    ];
+    for (const [name, got, want] of cases)
+      console.log((got === want ? "ok" : "FAIL") + "\t" + name + (got === want ? "" : " (got " + got + ")"));
+  ' "$ROOT/Language.js")
+  while IFS=$'\t' read -r status name; do
+    [[ $status == ok ]] && ok "$name" || ko "$name"
+  done <<<"$node_out"
+else
+  echo "  skip Language.js tests (node not installed)"
+fi
+
+make_bin bin-lang rclone fusermount3 secret-tool zenity
+rm -f "$WORK/bin-lang/mountpoint"  # a symlink to the real binary: never write through it
+printf '#!/bin/sh\nexit 0\n' >"$WORK/bin-lang/mountpoint"; chmod +x "$WORK/bin-lang/mountpoint"
+printf '#!/bin/sh\nprintf "%%s" "$2" >"%s"\n' "$WORK/notified" >"$WORK/bin-lang/notify-send"; chmod +x "$WORK/bin-lang/notify-send"
+printf 'gdrive:  drive\n' >"$REMOTES"
+notified() { # notified <omarchy language or -> <LANG>
+  rm -f "$WORK/notified" "$WORK/language"
+  [[ $1 != - ]] && echo "$1" >"$WORK/language"
+  HOME="$WORK/home" PATH="$WORK/bin-lang" RCLONE_CONFIG="$CONFIG" LANG="$2" LC_ALL= LC_MESSAGES= \
+    OMARCHY_LANGUAGE_FILE="$WORK/language" bash "$HELPER" unmount "$BASE" gdrive >/dev/null
+  cat "$WORK/notified" 2>/dev/null
+}
+[[ $(notified - en_US.UTF-8) == "Unmounted gdrive" ]] && ok "helper: English by default" || ko "helper: English by default" "$(notified - en_US.UTF-8)"
+[[ $(notified - fr_FR.UTF-8) == "gdrive démonté" ]] && ok "helper: French from LANG" || ko "helper: French from LANG" "$(notified - fr_FR.UTF-8)"
+[[ $(notified fr en_US.UTF-8) == "gdrive démonté" ]] && ok "helper: French from the Omarchy language" || ko "helper: French from the Omarchy language"
+[[ $(notified en fr_FR.UTF-8) == "Unmounted gdrive" ]] && ok "helper: Omarchy language wins over LANG" || ko "helper: Omarchy language wins over LANG"
+[[ $(notified - de_DE.UTF-8) == "Unmounted gdrive" ]] && ok "helper: untranslated language falls back to English" || ko "helper: untranslated language falls back to English"
 
 echo
 echo "$pass passed, $fail failed"

@@ -14,6 +14,8 @@
 # Arguments arrive as argv from QML (never through a shell string) and are
 # validated here before use.
 
+# Keep the caller's locale for ui_lang before forcing a stable one for tools.
+ORIG_LC_ALL="${LC_ALL:-}"
 export LC_ALL=C.UTF-8
 set -o pipefail
 
@@ -29,6 +31,30 @@ have_rclone() { command -v rclone >/dev/null 2>&1; }
 have_fuse() { command -v fusermount3 >/dev/null 2>&1 && [[ -c /dev/fuse ]]; }
 have_secret_tool() { command -v secret-tool >/dev/null 2>&1; }
 have_zenity() { command -v zenity >/dev/null 2>&1; }
+
+# UI language for notifications and the password dialog: the Omarchy language
+# when set, else the system locale, else English (same rule as Language.js).
+ui_lang() {
+  local file="${OMARCHY_LANGUAGE_FILE:-${XDG_CONFIG_HOME:-$HOME/.config}/omarchy/language}"
+  local code=""
+  [[ -f $file ]] && code=$(head -n 1 "$file" | tr -d '[:space:]')
+  [[ -n $code ]] || code="${ORIG_LC_ALL:-${LC_MESSAGES:-${LANG:-}}}"
+  code="${code%%[._@-]*}"
+  [[ $code =~ ^[a-zA-Z]{2,3}$ && $code != C ]] || code=en
+  printf '%s' "${code,,}"
+}
+
+# msg <key> [args...]: a translated message (French or English).
+msg() {
+  local key="$1"; shift
+  local fr=0
+  [[ $(ui_lang) == fr ]] && fr=1
+  case "$key" in
+    mounted) ((fr)) && printf '%s monté sur %s (%s)' "$@" || printf 'Mounted %s at %s (%s)' "$@" ;;
+    unmounted) ((fr)) && printf '%s démonté' "$@" || printf 'Unmounted %s' "$@" ;;
+    password) ((fr)) && printf 'Mot de passe de la configuration rclone' || printf 'rclone configuration password' ;;
+  esac
+}
 
 # Desktop notification, skipped quietly when notify-send is not installed.
 notify() {
@@ -212,7 +238,7 @@ cmd_mount() {
 
   if mountpoint -q "$target"; then
     printf '%s' "$mode" >"$state"
-    notify "Mounted $name at $target ($mode)"
+    notify "$(msg mounted "$name" "$target" "$mode")"
     [[ $open_after == 1 ]] && setsid -f env -u LC_ALL xdg-open "$target" >/dev/null 2>&1
     jq -cn --arg name "$name" --arg mode "$mode" '{ok: true, action: "mount", name: $name, mode: $mode}'
   else
@@ -239,7 +265,7 @@ cmd_unmount() {
   if err=$(fusermount3 -uz -- "$target" 2>&1); then
     rm -f -- "$base/.$name.mode"
     rmdir -- "$target" 2>/dev/null
-    notify "Unmounted $name"
+    notify "$(msg unmounted "$name")"
     jq -cn --arg name "$name" '{ok: true, action: "unmount", name: $name}'
   else
     json_error unmountFailed "$err"
@@ -252,7 +278,7 @@ cmd_unlock() {
   require_secret_tool
   require_zenity
   local p
-  p=$(zenity --password --title="rclone configuration password" 2>/dev/null) || json_error cancelled
+  p=$(zenity --password --title="$(msg password)" 2>/dev/null) || json_error cancelled
   [[ -n $p ]] || json_error cancelled
   if ! RCLONE_CONFIG_PASS="$p" rclone listremotes --ask-password=false </dev/null >/dev/null 2>&1; then
     json_error badPassword
