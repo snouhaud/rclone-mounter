@@ -2,6 +2,7 @@ import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
 import Quickshell
+import Quickshell.Io
 import qs.Commons
 import qs.Commons as Commons
 import qs.Ui
@@ -12,8 +13,8 @@ Panel {
   ipcTarget: "io.github.snouhaud.rclone-mounter"
   manageIpc: false
 
-  readonly property Item panelFlick: panel.loadedContent ? panel.loadedContent.panelFlick : null
-  readonly property Item remoteColumn: panel.loadedContent ? panel.loadedContent.remoteColumn : null
+  readonly property Item panelFlick: keyCatcher.panelFlick
+  readonly property Item remoteColumn: keyCatcher.remoteColumn
 
   property bool cursorActive: false
   property int cursorPos: 0
@@ -233,7 +234,7 @@ Panel {
     cursorPos = 0
     if (panelFlick) panelFlick.contentY = 0
     rclone.refresh()
-    Qt.callLater(function() { if (panel.loadedContent) panel.loadedContent.forceActiveFocus() })
+    Qt.callLater(function() { if (keyCatcher) keyCatcher.forceActiveFocus() })
   }
   onCursorTargetsChanged: if (cursorPos >= cursorTargets.length) cursorPos = Math.max(0, cursorTargets.length - 1)
 
@@ -248,7 +249,7 @@ Panel {
     onTriggered: root.forgetArmed = false
   }
 
-  ShellIpc {
+  IpcHandler {
     target: root.ipcTarget
     function open(): void { root.open() }
     function close(): void { root.close() }
@@ -276,9 +277,6 @@ Panel {
     anchors.fill: parent
     bar: root.bar
     text: rclone.mountedCount > 0 ? root.glyphCloudOn : root.glyphCloud
-    labelText: root.hasAlert ? "!"
-      : rclone.locked ? ""
-      : root.showCount && rclone.mountedCount > 0 ? Commons.I18n.formatNumber(rclone.mountedCount) : ""
     foreground: root.hasAlert ? (root.bar ? root.bar.urgent : Commons.Color.urgent)
       : rclone.mountedCount > 0 ? root.barForeground : Qt.darker(root.barForeground, 1.55)
     onPressed: function(buttonCode) {
@@ -293,11 +291,11 @@ Panel {
     owner: root
     bar: root.bar
     open: root.opened
-    focusTarget: panel.loadedContent
+    focusTarget: keyCatcher
     contentWidth: panel.fittedContentWidth(Style.space(400))
-    contentHeight: panel.fittedContentHeight(panel.loadedContentHeight, Style.space(600))
+    contentHeight: panel.fittedContentHeight(keyCatcher.implicitHeight, Style.space(600))
 
-    content: PanelKeyCatcher {
+    PanelKeyCatcher {
       id: keyCatcher
       property alias panelFlick: panelFlick
       property alias remoteColumn: remoteColumn
