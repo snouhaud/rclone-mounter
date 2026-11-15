@@ -9,6 +9,7 @@
 #   rclone-mounts.sh status  <base> <excluded,csv> <readonly,csv>
 #   rclone-mounts.sh mount   <base> <remote> <full|writes|read-only> <readonly,csv> <open:0|1>
 #   rclone-mounts.sh unmount <base> <remote>
+#   rclone-mounts.sh activity <base>   # upload progress of mounts that have an rc socket
 #   rclone-mounts.sh unlock
 #   rclone-mounts.sh forget        # delete the stored password from the keyring
 #
@@ -105,6 +106,22 @@ expand_base() {
   BASE="${base%/}"
 }
 
+# Each mount serves rclone's remote control on a unix socket in this folder
+# (mode 0700, inside $XDG_RUNTIME_DIR), so the panel can read upload progress.
+rc_dir() { printf '%s/rclone-mounter' "${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"; }
+
+# Prints {"total":N,"free":N} for a mount point, or null when unknown. rclone
+# reports 1 PiB (2^50) for backends that cannot tell their quota.
+space_json() {
+  local total free
+  read -r total free < <(timeout 5 df -B1 --output=size,avail -- "$1" 2>/dev/null | tail -n 1)
+  if [[ $total =~ ^[0-9]+$ && $free =~ ^[0-9]+$ ]] && ((total > 0 && total < 1125899906842624)); then
+    printf '{"total":%s,"free":%s}' "$total" "$free"
+  else
+    printf 'null'
+  fi
+}
+
 valid_remote() {
   [[ $1 =~ ^[A-Za-z0-9_][A-Za-z0-9_.@+-]{0,63}$ ]]
 }
@@ -166,22 +183,24 @@ cmd_status() {
   fi
   [[ -n $listing ]] || issues+=(noRemotes)
 
-  local name type mounted mode rows=()
+  local name type mounted mode space rows=()
   while IFS=$'\t' read -r name type; do
     [[ -z $name ]] && continue
     valid_remote "$name" || continue
     in_csv "$name" "$excluded" && continue
     mounted=false
     mode=""
+    space=null
     if mountpoint -q "$base/$name" 2>/dev/null; then
       mounted=true
       mode=$(head -c 16 "$base/.$name.mode" 2>/dev/null)
+      space=$(space_json "$base/$name")
     fi
     forced=false
     in_csv "$name" "$readonly_csv" && forced=true
     rows+=("$(jq -cn --arg name "$name" --arg type "$type" --arg path "$base/$name" \
-      --arg mode "$mode" --argjson mounted "$mounted" --argjson forced "$forced" \
-      '{name: $name, type: $type, path: $path, mounted: $mounted, mode: $mode, forcedReadOnly: $forced}')")
+      --arg mode "$mode" --argjson mounted "$mounted" --argjson forced "$forced" --argjson space "$space" \
+      '{name: $name, type: $type, path: $path, mounted: $mounted, mode: $mode, forcedReadOnly: $forced, space: $space}')")
   done <<<"$listing"
 
   ((${#rows[@]})) || rows=("null")
@@ -220,7 +239,18 @@ cmd_mount() {
     exit 0
   fi
 
-  local opts=(
+  local sockdir sock
+  sockdir=$(rc_dir)
+  sock="$sockdir/$name.sock"
+  local opts=()
+  # A unix socket path is limited to 108 bytes; without one the mount still
+  # works, the panel just cannot show its upload progress.
+  if ((${#sock} < 100)) && mkdir -p -m 700 -- "$sockdir" && chmod 700 -- "$sockdir"; then
+    rm -f -- "$sock"
+    opts+=(--rc --rc-addr "unix://$sock" --rc-no-auth)
+  fi
+
+  opts+=(
     --umask 077
     --dir-cache-time 30s
     --poll-interval 0
@@ -290,6 +320,35 @@ cmd_unmount() {
   fi
 }
 
+# Upload progress, read from each mount's rc socket. Light enough to poll every
+# few seconds: no listremotes, no keyring, no network.
+cmd_activity() {
+  local base sockdir sock name vfs core rows=()
+  expand_base "$1"; base="$BASE"
+  sockdir=$(rc_dir)
+  require_rclone
+  for sock in "$sockdir"/*.sock; do
+    [[ -S $sock ]] || continue
+    name=$(basename -- "$sock" .sock)
+    valid_remote "$name" || continue
+    mountpoint -q "$base/$name" 2>/dev/null || continue
+    vfs=$(timeout 3 rclone rc --unix-socket "$sock" vfs/stats </dev/null 2>/dev/null) || continue
+    jq -e 'type == "object"' >/dev/null 2>&1 <<<"$vfs" || continue
+    core=$(timeout 3 rclone rc --unix-socket "$sock" core/stats </dev/null 2>/dev/null)
+    jq -e 'type == "object"' >/dev/null 2>&1 <<<"$core" || core='{}'
+    # Uploads go from the local VFS cache to the remote; skip transfers into the cache.
+    rows+=("$(jq -cn --arg name "$name" --argjson vfs "$vfs" --argjson core "$core" '
+      ($vfs.diskCache // {}) as $c
+      | [($core.transferring // [])[] | select((.dstFs // "") != ($c.path // "-"))] as $t
+      | {key: $name, value: {
+          inProgress: ($c.uploadsInProgress // 0), queued: ($c.uploadsQueued // 0),
+          errored: ($c.erroredFiles // 0),
+          bytes: ([$t[].bytes // 0] | add // 0), size: ([$t[].size // 0] | add // 0),
+          speed: ([$t[].speed // 0] | add // 0)}}' 2>/dev/null)")
+  done
+  printf '%s\n' "${rows[@]}" | jq -cs '{ok: true, remotes: (map(select(. != null)) | from_entries)}'
+}
+
 cmd_unlock() {
   require_rclone
   require_config
@@ -322,6 +381,7 @@ case "${1:-}" in
   status) shift; cmd_status "$@" ;;
   mount) shift; cmd_mount "$@" ;;
   unmount) shift; cmd_unmount "$@" ;;
+  activity) shift; cmd_activity "$@" ;;
   unlock) cmd_unlock ;;
   forget) cmd_forget ;;
   *) json_error usage "$1" ;;

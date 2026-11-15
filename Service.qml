@@ -23,6 +23,12 @@ Item {
   property string lastErrorDetail: ""
   // Remote currently being mounted/unmounted ("" when idle), or "*unlock*".
   property string busyRemote: ""
+  // Upload progress per mounted remote, from the mount's rc socket:
+  // name -> {inProgress, queued, errored, bytes, size, speed}. Mounts made
+  // before rc sockets existed have no entry.
+  property var activity: ({})
+  // Set by the panel while it is open, to poll activity quickly.
+  property bool watching: false
 
   readonly property bool busy: actionProcess.running
   readonly property bool refreshing: statusProcess.running
@@ -33,6 +39,12 @@ Item {
   readonly property bool blocked: rcloneMissing || noConfig
   readonly property bool canMount: !blocked && !fuseMissing && !locked
   readonly property var knownIssues: ["rcloneMissing", "fuseMissing", "noConfig", "noRemotes", "secretToolMissing", "zenityMissing", "badPassword"]
+  readonly property int uploadCount: {
+    var n = 0
+    for (var k in activity) n += activity[k].inProgress + activity[k].queued
+    return n
+  }
+  readonly property bool uploading: uploadCount > 0
   readonly property int mountedCount: {
     var n = 0
     for (var i = 0; i < remotes.length; i++) if (remotes[i].mounted) n++
@@ -122,13 +134,61 @@ Item {
         path: String(r.path || "").substring(0, 600),
         mounted: r.mounted === true,
         mode: validMode(mode) ? mode : "",
-        forcedReadOnly: r.forcedReadOnly === true
+        forcedReadOnly: r.forcedReadOnly === true,
+        space: cleanSpace(r.space)
       })
     }
     remotes = clean
     loaded = true
+    if (mountedCount > 0) refreshActivity()
+    else activity = ({})
     // Prerequisite errors are shown as alerts from `issues`; drop stale ones.
     if (["parseFailed", "badPassword", "rcloneMissing", "fuseMissing", "noConfig", "statusFailed"].indexOf(lastError) !== -1) clearError()
+  }
+
+  function count(value) {
+    var n = Number(value)
+    return isFinite(n) && n >= 0 ? n : 0
+  }
+
+  // {total, free} in bytes, or null when the remote does not report its quota.
+  function cleanSpace(space) {
+    if (!space || typeof space !== "object") return null
+    var total = count(space.total), free = count(space.free)
+    return total > 0 ? { total: total, free: Math.min(free, total) } : null
+  }
+
+  function refreshActivity() {
+    if (activityProcess.running || statusProcess.running) return
+    activityProcess.command = ["bash", helperPath, "activity", mountBase]
+    activityProcess.running = true
+  }
+
+  function applyActivity(raw) {
+    var obj = parse(raw)
+    if (!obj || obj.ok !== true || !obj.remotes || typeof obj.remotes !== "object") return
+    var clean = {}
+    var names = Object.keys(obj.remotes).slice(0, 100)
+    for (var i = 0; i < names.length; i++) {
+      var a = obj.remotes[names[i]]
+      if (!validName(names[i]) || !a || typeof a !== "object") continue
+      var size = count(a.size)
+      clean[names[i]] = {
+        inProgress: Math.floor(count(a.inProgress)),
+        queued: Math.floor(count(a.queued)),
+        errored: Math.floor(count(a.errored)),
+        bytes: Math.min(count(a.bytes), size),
+        size: size,
+        speed: count(a.speed)
+      }
+    }
+    activity = clean
+  }
+
+  // Upload state of a remote, or null when idle or unknown.
+  function uploadOf(name) {
+    var a = activity[name]
+    return a && (a.inProgress + a.queued) > 0 ? a : null
   }
 
   // Fixed commands only: nothing from rclone output is ever interpolated here.
@@ -191,6 +251,22 @@ Item {
     running: true
     triggeredOnStart: true
     onTriggered: root.refresh()
+  }
+
+  // Fast poll while something uploads or the panel is open.
+  Timer {
+    interval: 2000
+    repeat: true
+    running: root.mountedCount > 0 && (root.uploading || root.watching)
+    onTriggered: root.refreshActivity()
+  }
+
+  Process {
+    id: activityProcess
+    running: false
+    command: []
+    stdout: StdioCollector { id: activityOut; waitForEnd: true }
+    onExited: function(exitCode) { if (exitCode === 0) root.applyActivity(activityOut.text) }
   }
 
   Process {

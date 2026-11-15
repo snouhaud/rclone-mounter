@@ -12,6 +12,9 @@ An [Omarchy](https://omarchy.org) bar widget that lists your
   - **Streaming**: `--vfs-cache-mode writes` with chunked reads. Best for media.
   - **Read-only**: `--read-only`. The remote cannot be modified.
 - Remotes can be hidden, or forced read-only (useful for a backup repository).
+- Shows the free space of each mounted remote (when the backend reports a quota).
+- Shows upload progress (files, bytes, speed, time left) while the VFS cache
+  sends your writes to the remote; the bar icon turns into an upload cloud.
 - Encrypted rclone configs are unlocked with a password kept in the keyring.
 - Checks its prerequisites and shows an alert with a fix-it button when
   something is missing: rclone, FUSE 3, an rclone config or a remote, and
@@ -68,7 +71,8 @@ Create remotes with `rclone config` if you have none yet.
 ## Use
 
 - **Bar icon**: dim cloud when nothing is mounted; cloud with a check mark and
-  the number of mounts otherwise; red `!` when a prerequisite is missing.
+  the number of mounts otherwise; accent-colored upload cloud while writes are
+  being sent to a remote; red `!` when a prerequisite is missing.
   Left click opens the panel, right click refreshes.
 - **Panel keys**: `↑`/`↓` move, `←`/`→` change mode, `Enter` mount/unmount,
   `m` cycle mode, `o` open the mounted folder, `r` refresh, `u` unlock,
@@ -129,7 +133,7 @@ The mode used for each mount is remembered in `<mountBase>/.<remote>.mode`.
 ## IPC
 
 ```bash
-omarchy-shell io.github.snouhaud.rclone-mounter status          # one line per remote
+omarchy-shell io.github.snouhaud.rclone-mounter status          # one line per remote (+ free space, uploads)
 omarchy-shell io.github.snouhaud.rclone-mounter mount gdrive writes
 omarchy-shell io.github.snouhaud.rclone-mounter unmount gdrive
 omarchy-shell io.github.snouhaud.rclone-mounter forget          # delete the keyring password
@@ -144,6 +148,16 @@ string. Remote names, modes and the mount folder are validated before use, and
 all text is rendered as plain text. The plugin makes no network request of its
 own; only rclone talks to your remotes. The only commands it launches in a
 terminal are fixed ones (`omarchy pkg add <package>`, `rclone config`).
+
+Free space comes from `df` on the mount point, so it costs no extra request:
+rclone answers it from the backend's quota. Backends without one (S3, for
+example) show nothing.
+
+Upload progress is read from rclone's remote control. Each mount serves it on a
+unix socket, `$XDG_RUNTIME_DIR/rclone-mounter/<remote>.sock`, in a folder only
+you can open (mode 0700); the panel queries `vfs/stats` and `core/stats` there,
+every 2 s while something uploads or the panel is open. Mounts made by an
+earlier version have no socket: unmount and mount them again to see progress.
 
 Run the tests (no network, no real mount; rclone is faked):
 

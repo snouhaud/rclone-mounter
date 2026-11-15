@@ -42,6 +42,8 @@ Panel {
   readonly property string glyphDownload: String.fromCodePoint(0xF01DA)   // download
   readonly property string glyphCog: String.fromCodePoint(0xF0493)        // cog
   readonly property string glyphKeyOff: String.fromCodePoint(0xF0B76)     // key-remove
+  readonly property string glyphUpload: String.fromCodePoint(0xF0167)     // cloud-upload
+  readonly property color accent: Commons.Color.accent
 
   // English by default; the Omarchy language, else the system locale, when a
   // catalog exists for it (see Strings.qml and Language.js).
@@ -159,9 +161,44 @@ Panel {
     return strings.t("hero.none")
   }
 
+  // Decimal units (1 KB = 1000 B), like the Omarchy panels; names from the catalog.
+  function formatBytes(bytes) {
+    var units = strings.t("units.bytes").split(",")
+    if (units.length < 5) units = ["B", "KB", "MB", "GB", "TB"]
+    var value = Number(bytes || 0)
+    if (!isFinite(value) || value <= 0) return Commons.I18n.formatNumber(0) + " " + units[0]
+    var i = 0
+    while (value >= 1000 && i < units.length - 1) { value /= 1000; i++ }
+    var decimals = value >= 100 || i === 0 ? 0 : (value >= 10 ? 1 : 2)
+    return Commons.I18n.formatNumber(Number(value.toFixed(decimals))) + " " + units[i]
+  }
+
+  function formatDuration(sec) {
+    sec = Math.max(1, Math.round(sec))
+    if (sec < 60) return strings.t("time.seconds").arg(Commons.I18n.formatNumber(sec))
+    if (sec < 3600) return strings.t("time.minutes").arg(Commons.I18n.formatNumber(Math.round(sec / 60)))
+    return strings.t("time.hours").arg(Commons.I18n.formatNumber(Math.round(sec / 360) / 10))
+  }
+
+  // "Uploading 3 files · 12 MB of 40 MB · 2.1 MB/s · ~13 s left", or "" when idle.
+  function uploadText(up) {
+    if (!up) return ""
+    var files = up.inProgress + up.queued
+    var parts = [strings.tn("remote.uploading", files).arg(Commons.I18n.formatNumber(files))]
+    if (up.size > 0) parts.push(strings.t("remote.uploadProgress").arg(formatBytes(up.bytes)).arg(formatBytes(up.size)))
+    if (up.speed > 0) {
+      parts.push(strings.t("units.perSecond").arg(formatBytes(up.speed)))
+      if (up.size > up.bytes) parts.push(strings.t("remote.eta").arg(formatDuration((up.size - up.bytes) / up.speed)))
+    }
+    return parts.join(" · ")
+  }
+
   function remoteSubtitle(r) {
     if (rclone.busyRemote === r.name) return r.mounted ? strings.t("remote.unmounting") : strings.t("remote.mounting")
-    if (r.mounted) return strings.t("remote.mountedAs").arg(r.mode !== "" ? modeLabel(r.mode) : "?")
+    if (r.mounted) {
+      var mounted = strings.t("remote.mountedAs").arg(r.mode !== "" ? modeLabel(r.mode) : "?")
+      return r.space ? mounted + " · " + strings.t("remote.free").arg(formatBytes(r.space.free)) : mounted
+    }
     var parts = [r.type]
     if (r.forcedReadOnly) parts.push(strings.t("remote.forcedReadOnly"))
     return parts.join(" · ")
@@ -240,6 +277,7 @@ Panel {
   Service {
     id: rclone
     settings: root.settings
+    watching: root.opened
   }
 
   Timer {
@@ -265,7 +303,11 @@ Panel {
       if (rclone.locked) out.push("locked")
       for (var i = 0; i < rclone.remotes.length; i++) {
         var r = rclone.remotes[i]
-        out.push(r.name + "\t" + (r.mounted ? "mounted " + r.mode : "unmounted"))
+        var line = r.name + "\t" + (r.mounted ? "mounted " + r.mode : "unmounted")
+        if (r.space) line += "\tfree " + r.space.free + "/" + r.space.total
+        var up = rclone.uploadOf(r.name)
+        if (up) line += "\tuploading " + (up.inProgress + up.queued) + " " + Math.round(up.bytes) + "/" + Math.round(up.size)
+        out.push(line)
       }
       return out.join("\n")
     }
@@ -275,11 +317,12 @@ Panel {
     id: button
     anchors.fill: parent
     bar: root.bar
-    text: rclone.mountedCount > 0 ? root.glyphCloudOn : root.glyphCloud
+    text: rclone.uploading ? root.glyphUpload : rclone.mountedCount > 0 ? root.glyphCloudOn : root.glyphCloud
     labelText: root.hasAlert ? "!"
       : rclone.locked ? ""
       : root.showCount && rclone.mountedCount > 0 ? Commons.I18n.formatNumber(rclone.mountedCount) : ""
     foreground: root.hasAlert ? (root.bar ? root.bar.urgent : Commons.Color.urgent)
+      : rclone.uploading ? root.accent
       : rclone.mountedCount > 0 ? root.barForeground : Qt.darker(root.barForeground, 1.55)
     onPressed: function(buttonCode) {
       if (buttonCode === Qt.RightButton) rclone.refresh()
@@ -684,6 +727,7 @@ Panel {
     property var remote: null
     property int rowIndex: 0
     readonly property bool rowBusy: rclone.busyRemote === (remote ? remote.name : "")
+    readonly property var upload: remote && remote.mounted ? rclone.uploadOf(remote.name) : null
 
     hasCursor: root.cursorIs("remotes", rowIndex)
     foreground: root.foreground
@@ -736,6 +780,31 @@ Panel {
           font.family: root.fontFamily
           font.pixelSize: Style.font.caption
           elide: Text.ElideRight
+        }
+        Text {
+          visible: row.upload !== null
+          textFormat: Text.PlainText
+          Layout.fillWidth: true
+          text: root.uploadText(row.upload)
+          color: root.accent
+          font.family: root.fontFamily
+          font.pixelSize: Style.font.caption
+          elide: Text.ElideRight
+        }
+        Rectangle {
+          visible: row.upload !== null && row.upload.size > 0
+          Layout.fillWidth: true
+          Layout.topMargin: Style.space(2)
+          implicitHeight: Style.space(3)
+          radius: height / 2
+          color: Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.15)
+          Rectangle {
+            width: row.upload && row.upload.size > 0 ? parent.width * Math.min(1, row.upload.bytes / row.upload.size) : 0
+            height: parent.height
+            radius: parent.radius
+            color: root.accent
+            Behavior on width { NumberAnimation { duration: 400 } }
+          }
         }
       }
 

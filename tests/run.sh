@@ -23,7 +23,7 @@ make_bin() {
   local dir="$WORK/$1"; shift
   mkdir -p "$dir"
   local tool
-  for tool in bash jq awk head tail tr cut grep sed mountpoint mkdir rmdir rm cat printf env timeout sleep setsid; do
+  for tool in bash jq awk head tail tr cut grep sed mountpoint mkdir rmdir rm cat printf env timeout sleep setsid basename chmod id; do
     local real; real=$(command -v "$tool") && ln -sf "$real" "$dir/$tool"
   done
   for tool in "$@"; do
@@ -45,6 +45,13 @@ case "\$1 \$2" in
   listremotes*)
     [[ -f "$WORK/locked" ]] && { echo "config encrypted" >&2; exit 1; }
     cat "$REMOTES" ;;
+  "rc --unix-socket")
+    [[ -S \$3 ]] || exit 1
+    case "\$4" in
+      vfs/stats) cat "$WORK/rc-vfs.json" ;;
+      core/stats) cat "$WORK/rc-core.json" ;;
+      *) exit 1 ;;
+    esac ;;
   *) exit 1 ;;
 esac
 FAKE
@@ -56,7 +63,7 @@ make_bin bin-no-keyring rclone fusermount3
 
 run() { # run <bin-dir> <args...>
   local bin="$WORK/$1"; shift
-  HOME="$WORK/home" PATH="$bin" RCLONE_CONFIG="$CONFIG" bash "$HELPER" "$@"
+  HOME="$WORK/home" PATH="$bin" RCLONE_CONFIG="$CONFIG" XDG_RUNTIME_DIR="$WORK/run" bash "$HELPER" "$@"
 }
 mkdir -p "$WORK/home"
 BASE="$WORK/mnt"
@@ -194,6 +201,40 @@ notified() { # notified <omarchy language or -> <LANG>
 [[ $(notified fr en_US.UTF-8) == "gdrive démonté" ]] && ok "helper: French from the Omarchy language" || ko "helper: French from the Omarchy language"
 [[ $(notified en fr_FR.UTF-8) == "Unmounted gdrive" ]] && ok "helper: Omarchy language wins over LANG" || ko "helper: Omarchy language wins over LANG"
 [[ $(notified - de_DE.UTF-8) == "Unmounted gdrive" ]] && ok "helper: untranslated language falls back to English" || ko "helper: untranslated language falls back to English"
+
+echo "free space and upload progress"
+make_bin bin-mounted rclone fusermount3 secret-tool zenity
+rm -f "$WORK/bin-mounted/mountpoint"
+printf '#!/bin/sh\nexit 0\n' >"$WORK/bin-mounted/mountpoint"; chmod +x "$WORK/bin-mounted/mountpoint"
+printf '#!/bin/sh\nprintf "%%s\\n" "header" "$(cat %s)"\n' "$WORK/df-out" >"$WORK/bin-mounted/df"; chmod +x "$WORK/bin-mounted/df"
+printf 'gdrive:  drive\n' >"$REMOTES"
+echo "2000000000000 500000000000" >"$WORK/df-out"
+check "a mounted remote reports its free space" \
+  '.remotes[0].mounted and .remotes[0].space == {total: 2000000000000, free: 500000000000}' "$(run bin-mounted status "$BASE" '' '')"
+echo "1125899906842624 1125899906842624" >"$WORK/df-out"
+check "the 1 PiB placeholder of backends without quota is unknown" '.remotes[0].space == null' "$(run bin-mounted status "$BASE" '' '')"
+echo "garbage" >"$WORK/df-out"
+check "unreadable df output is unknown" '.remotes[0].space == null' "$(run bin-mounted status "$BASE" '' '')"
+check "an unmounted remote has no space" '.remotes[0].space == null' "$(run bin-full status "$BASE" '' '')"
+
+check "activity without sockets is empty" '.ok and .remotes == {}' "$(run bin-mounted activity "$BASE")"
+mkdir -p "$WORK/run/rclone-mounter"
+if command -v python3 >/dev/null 2>&1; then
+  python3 -c 'import socket,sys; socket.socket(socket.AF_UNIX).bind(sys.argv[1])' "$WORK/run/rclone-mounter/gdrive.sock"
+  echo '{"diskCache":{"path":"/cache/gdrive","uploadsInProgress":2,"uploadsQueued":1,"erroredFiles":0}}' >"$WORK/rc-vfs.json"
+  echo '{"transferring":[{"name":"a","bytes":10,"size":40,"speed":5,"dstFs":"gdrive:"},{"name":"b","bytes":5,"size":10,"speed":1,"dstFs":"gdrive:"},{"name":"dl","bytes":99,"size":99,"speed":9,"dstFs":"/cache/gdrive"}]}' >"$WORK/rc-core.json"
+  out=$(run bin-mounted activity "$BASE")
+  check "activity reports uploads from the rc socket" '.remotes.gdrive.inProgress == 2 and .remotes.gdrive.queued == 1' "$out"
+  check "activity sums uploads and skips transfers into the cache" '.remotes.gdrive | .bytes == 15 and .size == 50 and .speed == 6' "$out"
+  check "activity ignores sockets of remotes that are not mounted" '.remotes == {}' "$(run bin-full activity "$BASE")"
+  echo 'not json' >"$WORK/rc-core.json"
+  check "activity survives a bad core/stats reply" '.remotes.gdrive.inProgress == 2 and .remotes.gdrive.bytes == 0' "$(run bin-mounted activity "$BASE")"
+  ln -s gdrive.sock "$WORK/run/rclone-mounter/..sock" 2>/dev/null
+  check "activity ignores sockets with an invalid name" '(.remotes | keys) == ["gdrive"]' "$(run bin-mounted activity "$BASE")"
+else
+  echo "  skip rc socket tests (python3 not installed)"
+fi
+check "activity refuses a relative mount folder" '.error == "invalidBase"' "$(run bin-mounted activity relative)"
 
 echo
 echo "$pass passed, $fail failed"

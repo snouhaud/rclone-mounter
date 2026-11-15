@@ -62,5 +62,17 @@
   "forget.help": "Removes the rclone config password from the keyring. Current mounts keep working; you will be asked for it again next time.",
   "alert.badPassword": "The stored password does not work",
   "alert.badPasswordHelp": "The password in the keyring no longer unlocks the rclone configuration. Enter it again, or forget it below.",
-  "error.forgetFailed": "Could not delete the password from the keyring"
+  "error.forgetFailed": "Could not delete the password from the keyring",
+  "remote.free": "%1 free",
+  "remote.uploading": {
+    "one": "Uploading %1 file",
+    "other": "Uploading %1 files"
+  },
+  "remote.uploadProgress": "%1 of %2",
+  "remote.eta": "~%1 left",
+  "units.bytes": "B,KB,MB,GB,TB",
+  "units.perSecond": "%1/s",
+  "time.seconds": "%1 s",
+  "time.minutes": "%1 min",
+  "time.hours": "%1 h"
 }

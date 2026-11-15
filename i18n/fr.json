@@ -62,5 +62,17 @@
   "forget.help": "Supprime le mot de passe de la configuration rclone du trousseau. Les montages en cours continuent ; il sera redemandé la prochaine fois.",
   "alert.badPassword": "Le mot de passe enregistré ne fonctionne pas",
   "alert.badPasswordHelp": "Le mot de passe du trousseau ne déverrouille plus la configuration rclone. Saisis-le à nouveau, ou oublie-le ci-dessous.",
-  "error.forgetFailed": "Impossible de supprimer le mot de passe du trousseau"
+  "error.forgetFailed": "Impossible de supprimer le mot de passe du trousseau",
+  "remote.free": "%1 libres",
+  "remote.uploading": {
+    "one": "Envoi de %1 fichier",
+    "other": "Envoi de %1 fichiers"
+  },
+  "remote.uploadProgress": "%1 sur %2",
+  "remote.eta": "reste ~%1",
+  "units.bytes": "o,Ko,Mo,Go,To",
+  "units.perSecond": "%1/s",
+  "time.seconds": "%1 s",
+  "time.minutes": "%1 min",
+  "time.hours": "%1 h"
 }
