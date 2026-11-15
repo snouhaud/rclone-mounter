@@ -24,8 +24,8 @@ Item {
   // Remote currently being mounted/unmounted ("" when idle), or "*unlock*".
   property string busyRemote: ""
   // Upload progress per mounted remote, from the mount's rc socket:
-  // name -> {inProgress, queued, errored, bytes, size, speed}. Mounts made
-  // before rc sockets existed have no entry.
+  // name -> {inProgress, queued, errored, bytes, size, speed, pending, fromCache}.
+  // Without a reachable socket the helper falls back to the VFS cache metadata.
   property var activity: ({})
   // Set by the panel while it is open, to poll activity quickly.
   property bool watching: false
@@ -179,7 +179,11 @@ Item {
         errored: Math.floor(count(a.errored)),
         bytes: Math.min(count(a.bytes), size),
         size: size,
-        speed: count(a.speed)
+        speed: count(a.speed),
+        // Read from the VFS cache when the rc socket is unreachable: bytes left
+        // to send, no progress or speed.
+        pending: count(a.pending),
+        fromCache: a.fromCache === true
       }
     }
     activity = clean

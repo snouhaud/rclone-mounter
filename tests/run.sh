@@ -23,7 +23,7 @@ make_bin() {
   local dir="$WORK/$1"; shift
   mkdir -p "$dir"
   local tool
-  for tool in bash jq awk head tail tr cut grep sed mountpoint mkdir rmdir rm cat printf env timeout sleep setsid basename chmod id; do
+  for tool in bash jq awk head tail tr cut grep sed mountpoint mkdir rmdir rm cat printf env timeout sleep setsid basename chmod id date xargs; do
     local real; real=$(command -v "$tool") && ln -sf "$real" "$dir/$tool"
   done
   for tool in "$@"; do
@@ -50,8 +50,10 @@ case "\$1 \$2" in
     case "\$4" in
       vfs/stats) cat "$WORK/rc-vfs.json" ;;
       core/stats) cat "$WORK/rc-core.json" ;;
+      core/pid) echo '{"pid":1}' ;;
       *) exit 1 ;;
     esac ;;
+  mount*) printf '%s\n' "\$@" >"$WORK/mount-args"; exit 1 ;;
   *) exit 1 ;;
 esac
 FAKE
@@ -63,7 +65,8 @@ make_bin bin-no-keyring rclone fusermount3
 
 run() { # run <bin-dir> <args...>
   local bin="$WORK/$1"; shift
-  HOME="$WORK/home" PATH="$bin" RCLONE_CONFIG="$CONFIG" XDG_RUNTIME_DIR="$WORK/run" bash "$HELPER" "$@"
+  HOME="$WORK/home" PATH="$bin" RCLONE_CONFIG="$CONFIG" XDG_RUNTIME_DIR="$WORK/run" \
+    XDG_CACHE_HOME="$WORK/home/.cache" RCLONE_CACHE_DIR= bash "$HELPER" "$@"
 }
 mkdir -p "$WORK/home"
 BASE="$WORK/mnt"
@@ -231,9 +234,44 @@ if command -v python3 >/dev/null 2>&1; then
   check "activity survives a bad core/stats reply" '.remotes.gdrive.inProgress == 2 and .remotes.gdrive.bytes == 0' "$(run bin-mounted activity "$BASE")"
   ln -s gdrive.sock "$WORK/run/rclone-mounter/..sock" 2>/dev/null
   check "activity ignores sockets with an invalid name" '(.remotes | keys) == ["gdrive"]' "$(run bin-mounted activity "$BASE")"
+  # Sockets are now per mount: <remote>.<token>.sock. Two live ones (an old
+  # process still finishing next to a new mount) add up.
+  rm -f "$WORK/run/rclone-mounter/"*.sock
+  echo '{"transferring":[{"bytes":10,"size":40,"speed":5,"dstFs":"gdrive:"}]}' >"$WORK/rc-core.json"
+  for t in 111 222; do
+    python3 -c 'import socket,sys; socket.socket(socket.AF_UNIX).bind(sys.argv[1])' "$WORK/run/rclone-mounter/gdrive.$t.sock"
+  done
+  out=$(run bin-mounted activity "$BASE")
+  check "per-mount sockets are matched to their remote and added up" \
+    '(.remotes | keys) == ["gdrive"] and .remotes.gdrive.inProgress == 4 and .remotes.gdrive.bytes == 20' "$out"
+  python3 -c 'import socket,sys; socket.socket(socket.AF_UNIX).bind(sys.argv[1])' "$WORK/run/rclone-mounter/my.nas.333.sock"
+  check "a remote name with dots keeps them" '(.remotes | keys) == ["gdrive", "my.nas"]' "$(run bin-mounted activity "$BASE")"
+  rm -f "$WORK/run/rclone-mounter/"*.sock
+
+  echo "stale" >"$WORK/run/rclone-mounter/gdrive.1.sock"           # dead: not a socket
+  python3 -c 'import socket,sys; socket.socket(socket.AF_UNIX).bind(sys.argv[1])' "$WORK/run/rclone-mounter/gdrive.2.sock"
+  : >"$WORK/run/rclone-mounter/photos.3.sock"
+  run bin-full mount "$BASE" gdrive full '' 0 >/dev/null
+  [[ ! -e $WORK/run/rclone-mounter/gdrive.1.sock ]] && ok "mount drops dead sockets of the remote" || ko "mount drops dead sockets of the remote"
+  [[ -S $WORK/run/rclone-mounter/gdrive.2.sock ]] && ok "mount keeps live sockets" || ko "mount keeps live sockets"
+  [[ -e $WORK/run/rclone-mounter/photos.3.sock ]] && ok "mount leaves other remotes' sockets alone" || ko "mount leaves other remotes' sockets alone"
+  grep -qE "^unix://$WORK/run/rclone-mounter/gdrive\.[0-9]+\.sock\$" "$WORK/mount-args" &&
+    ok "mount uses a socket of its own" || ko "mount uses a socket of its own" "$(grep unix "$WORK/mount-args")"
+  rm -f "$WORK/run/rclone-mounter/"*.sock
 else
   echo "  skip rc socket tests (python3 not installed)"
 fi
+
+# No reachable socket: pending uploads come from the VFS cache metadata.
+mkdir -p "$BASE/gdrive" "$WORK/home/.cache/rclone/vfsMeta/gdrive/dir"
+printf '{"Size": 3000, "Dirty": true}' >"$WORK/home/.cache/rclone/vfsMeta/gdrive/dir/a"
+printf '{"Size": 500, "Dirty": true}' >"$WORK/home/.cache/rclone/vfsMeta/gdrive/b"
+printf '{"Size": 9999, "Dirty": false}' >"$WORK/home/.cache/rclone/vfsMeta/gdrive/c"
+check "without a socket, pending uploads come from the cache" \
+  '.remotes.gdrive | .fromCache and .queued == 2 and .pending == 3500 and .speed == 0' "$(run bin-mounted activity "$BASE")"
+check "the cache is not read for unmounted remotes" '.remotes == {}' "$(run bin-full activity "$BASE")"
+rm -f "$WORK/home/.cache/rclone/vfsMeta/gdrive/dir/a" "$WORK/home/.cache/rclone/vfsMeta/gdrive/b"
+check "a clean cache means no activity" '.remotes == {}' "$(run bin-mounted activity "$BASE")"
 check "activity refuses a relative mount folder" '.error == "invalidBase"' "$(run bin-mounted activity relative)"
 
 echo

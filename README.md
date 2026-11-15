@@ -153,11 +153,14 @@ Free space comes from `df` on the mount point, so it costs no extra request:
 rclone answers it from the backend's quota. Backends without one (S3, for
 example) show nothing.
 
-Upload progress is read from rclone's remote control. Each mount serves it on a
-unix socket, `$XDG_RUNTIME_DIR/rclone-mounter/<remote>.sock`, in a folder only
-you can open (mode 0700); the panel queries `vfs/stats` and `core/stats` there,
-every 2 s while something uploads or the panel is open. Mounts made by an
-earlier version have no socket: unmount and mount them again to see progress.
+Upload progress is read from rclone's remote control. Each mount serves it on
+its own unix socket, `$XDG_RUNTIME_DIR/rclone-mounter/<remote>.<token>.sock`, in
+a folder only you can open (mode 0700); the panel queries `vfs/stats` and
+`core/stats` there, every 2 s while something uploads or the panel is open.
+When no socket answers (a mount made by an earlier version, for example), the
+panel still shows the number of files and bytes left to upload, read from the
+VFS cache metadata (`~/.cache/rclone/vfsMeta/<remote>`), without speed or
+progress bar.
 
 Run the tests (no network, no real mount; rclone is faked):
 

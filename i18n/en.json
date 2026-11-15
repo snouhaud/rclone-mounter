@@ -74,5 +74,6 @@
   "units.perSecond": "%1/s",
   "time.seconds": "%1 s",
   "time.minutes": "%1 min",
-  "time.hours": "%1 h"
+  "time.hours": "%1 h",
+  "remote.uploadLeft": "%1 left"
 }

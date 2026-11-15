@@ -108,7 +108,41 @@ expand_base() {
 
 # Each mount serves rclone's remote control on a unix socket in this folder
 # (mode 0700, inside $XDG_RUNTIME_DIR), so the panel can read upload progress.
+# Each mount gets its own socket, <remote>.<token>.sock: a process that is still
+# shutting down after an unmount removes its socket file by path when it exits,
+# and must not take the socket of a newer mount of the same remote with it.
 rc_dir() { printf '%s/rclone-mounter' "${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"; }
+
+# Prints the remote a socket belongs to: <remote>.<digits>.sock, or the
+# <remote>.sock of version 2.1.0.
+sock_remote() {
+  local base="${1##*/}"
+  base="${base%.sock}"
+  local token="${base##*.}" rest="${base%.*}"
+  if [[ $base == *.* && $token =~ ^[0-9]+$ ]] && valid_remote "$rest"; then
+    printf '%s' "$rest"
+  else
+    printf '%s' "$base"
+  fi
+}
+
+# Folder where rclone keeps the VFS cache metadata (honors RCLONE_CACHE_DIR).
+vfs_meta_dir() {
+  printf '%s/vfsMeta/%s' "${RCLONE_CACHE_DIR:-${XDG_CACHE_HOME:-$HOME/.cache}/rclone}" "$1"
+}
+
+# Uploads still pending in the VFS cache: files whose metadata is "Dirty".
+# Fallback for mounts whose rc socket cannot be reached; no speed or progress.
+cache_pending_json() {
+  local meta
+  meta=$(vfs_meta_dir "$1")
+  [[ -d $meta ]] || { printf 'null'; return; }
+  timeout 5 grep -rlZ --include='*' -E '"Dirty": *true' -- "$meta" 2>/dev/null |
+    timeout 5 xargs -0 -r cat -- 2>/dev/null |
+    jq -cs 'map(select(type == "object" and .Dirty == true)) |
+      if length == 0 then null else {files: length, size: (map(.Size // 0) | add)} end' 2>/dev/null ||
+    printf 'null'
+}
 
 # Prints {"total":N,"free":N} for a mount point, or null when unknown. rclone
 # reports 1 PiB (2^50) for backends that cannot tell their quota.
@@ -239,14 +273,18 @@ cmd_mount() {
     exit 0
   fi
 
-  local sockdir sock
+  local sockdir sock old
   sockdir=$(rc_dir)
-  sock="$sockdir/$name.sock"
+  sock="$sockdir/$name.$(date +%s%N).sock"
+  # Drop sockets of earlier mounts of this remote that no process answers on.
+  for old in "$sockdir"/*.sock; do
+    [[ -e $old && $(sock_remote "$old") == "$name" ]] || continue
+    timeout 2 rclone rc --unix-socket "$old" core/pid </dev/null >/dev/null 2>&1 || rm -f -- "$old"
+  done
   local opts=()
   # A unix socket path is limited to 108 bytes; without one the mount still
   # works, the panel just cannot show its upload progress.
   if ((${#sock} < 100)) && mkdir -p -m 700 -- "$sockdir" && chmod 700 -- "$sockdir"; then
-    rm -f -- "$sock"
     opts+=(--rc --rc-addr "unix://$sock" --rc-no-auth)
   fi
 
@@ -320,33 +358,50 @@ cmd_unmount() {
   fi
 }
 
-# Upload progress, read from each mount's rc socket. Light enough to poll every
-# few seconds: no listremotes, no keyring, no network.
+# Upload progress of each mounted remote, from its rc socket(s), else from the
+# VFS cache metadata. Light enough to poll every few seconds: no listremotes,
+# no keyring, no network.
 cmd_activity() {
-  local base sockdir sock name vfs core rows=()
+  local base sockdir sock name vfs core dir pending rows=()
+  local -A live=()
   expand_base "$1"; base="$BASE"
   sockdir=$(rc_dir)
   require_rclone
   for sock in "$sockdir"/*.sock; do
     [[ -S $sock ]] || continue
-    name=$(basename -- "$sock" .sock)
+    name=$(sock_remote "$sock")
     valid_remote "$name" || continue
     mountpoint -q "$base/$name" 2>/dev/null || continue
     vfs=$(timeout 3 rclone rc --unix-socket "$sock" vfs/stats </dev/null 2>/dev/null) || continue
     jq -e 'type == "object"' >/dev/null 2>&1 <<<"$vfs" || continue
     core=$(timeout 3 rclone rc --unix-socket "$sock" core/stats </dev/null 2>/dev/null)
     jq -e 'type == "object"' >/dev/null 2>&1 <<<"$core" || core='{}'
+    live[$name]=1
     # Uploads go from the local VFS cache to the remote; skip transfers into the cache.
     rows+=("$(jq -cn --arg name "$name" --argjson vfs "$vfs" --argjson core "$core" '
       ($vfs.diskCache // {}) as $c
       | [($core.transferring // [])[] | select((.dstFs // "") != ($c.path // "-"))] as $t
-      | {key: $name, value: {
-          inProgress: ($c.uploadsInProgress // 0), queued: ($c.uploadsQueued // 0),
-          errored: ($c.erroredFiles // 0),
-          bytes: ([$t[].bytes // 0] | add // 0), size: ([$t[].size // 0] | add // 0),
-          speed: ([$t[].speed // 0] | add // 0)}}' 2>/dev/null)")
+      | {name: $name, inProgress: ($c.uploadsInProgress // 0), queued: ($c.uploadsQueued // 0),
+         errored: ($c.erroredFiles // 0),
+         bytes: ([$t[].bytes // 0] | add // 0), size: ([$t[].size // 0] | add // 0),
+         speed: ([$t[].speed // 0] | add // 0)}' 2>/dev/null)")
   done
-  printf '%s\n' "${rows[@]}" | jq -cs '{ok: true, remotes: (map(select(. != null)) | from_entries)}'
+  for dir in "$base"/*/; do
+    name=$(basename -- "$dir")
+    valid_remote "$name" && [[ -z ${live[$name]:-} ]] || continue
+    mountpoint -q "$base/$name" 2>/dev/null || continue
+    pending=$(cache_pending_json "$name")
+    [[ $pending != null && -n $pending ]] || continue
+    rows+=("$(jq -cn --arg name "$name" --argjson p "$pending" \
+      '{name: $name, inProgress: 0, queued: $p.files, errored: 0, bytes: 0, size: 0, speed: 0,
+        pending: $p.size, fromCache: true}' 2>/dev/null)")
+  done
+  # Several live sockets for one remote (an old process still finishing): add up.
+  printf '%s\n' "${rows[@]}" | jq -cs '{ok: true, remotes: (map(select(. != null))
+    | group_by(.name) | map({key: .[0].name, value: (reduce .[] as $r ({};
+        reduce ($r | to_entries[] | select(.key != "name")) as $e (.;
+          .[$e.key] = (if ($e.value | type) == "number" then (.[$e.key] // 0) + $e.value else $e.value end)))) })
+    | from_entries)}'
 }
 
 cmd_unlock() {

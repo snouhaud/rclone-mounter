@@ -185,6 +185,7 @@ Panel {
     if (!up) return ""
     var files = up.inProgress + up.queued
     var parts = [strings.tn("remote.uploading", files).arg(Commons.I18n.formatNumber(files))]
+    if (up.fromCache && up.pending > 0) parts.push(strings.t("remote.uploadLeft").arg(formatBytes(up.pending)))
     if (up.size > 0) parts.push(strings.t("remote.uploadProgress").arg(formatBytes(up.bytes)).arg(formatBytes(up.size)))
     if (up.speed > 0) {
       parts.push(strings.t("units.perSecond").arg(formatBytes(up.speed)))
@@ -306,7 +307,8 @@ Panel {
         var line = r.name + "\t" + (r.mounted ? "mounted " + r.mode : "unmounted")
         if (r.space) line += "\tfree " + r.space.free + "/" + r.space.total
         var up = rclone.uploadOf(r.name)
-        if (up) line += "\tuploading " + (up.inProgress + up.queued) + " " + Math.round(up.bytes) + "/" + Math.round(up.size)
+        if (up) line += "\tuploading " + (up.inProgress + up.queued)
+          + (up.fromCache ? " pending " + Math.round(up.pending) : " " + Math.round(up.bytes) + "/" + Math.round(up.size))
         out.push(line)
       }
       return out.join("\n")
